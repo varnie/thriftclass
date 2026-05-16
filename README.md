@@ -138,15 +138,36 @@ Output:
 
 ## How it works
 
-1. **`__slots__`** — recreates the class with `__slots__`, removing the per-instance `__dict__`.
-2. **Compact storage** — `int`/`float` fields are stored in a shared `bytearray` buffer via descriptors. Python `int` objects (28 bytes) become 8-byte `int64` values; Python `float` objects (24 bytes) become 8-byte `float64` values.
-3. **Bool packing** — bool fields become properties reading/writing bits in a single integer slot.
-4. **String interning** — `__setattr__` is patched to call `sys.intern()` on string values, so identical strings share one object.
-5. **Adaptive** — samples real field values, analyses ranges/cardinality, then rebuilds the class with optimal types (e.g. `int16`, `float32`).
+Six strategies run in sequence, each transforming the class and passing it to the next:
+
+### 1. `__slots__` — eliminates `__dict__`
+
+Recreates the class via `type(name, bases, namespace)` with `__slots__` set to all annotated field names. The per-instance `__dict__` (~40% of instance memory) is removed. Old class members are copied into the new namespace. For dataclasses on Python 3.10+, uses `dataclass(slots=True)` to preserve defaults.
+
+### 2. Compact storage — `int`/`float` → bytearray buffer
+
+Each `int`/`float` field becomes a `property` whose getter/setter call `struct.pack_into`/`unpack_from` on a shared `bytearray`. A Python `int` (~28 B) becomes an 8‑byte `int64`; a `float` (~24 B) becomes an 8‑byte `float64`. The buffer is lazily initialized on first access with resize-if-too-small logic for inheritance. Field order and offset tracking ensure parent and child fields don't overlap.
+
+### 3. Bool packing — N bools → 1 bitfield
+
+Bool slots are replaced with `property` descriptors that read/write individual bits of a single `_bool_flags` integer slot via bitmasks (`self._bool_flags |= 1 << bit`). Inheritance assigns unique bit offsets per level by querying the parent's `__thrift_bit_map__`, so child bits don't collide with parent bits. Only classes with ≥2 bool fields are packed.
+
+### 4. String interning — deduplicates strings
+
+Patches `__setattr__` and `__init__` in-place (no class recreation, avoiding `__slots__` conflicts). Every string value assigned to an interned field is run through `sys.intern()`, so identical strings (e.g. `"INFO"` across thousands of log entries) share one object. Safe for low-cardinality fields; high-cardinality fields (timestamps, UUIDs) leak memory since interned strings live for the process lifetime.
+
+### 5. Adaptive monitor — learns from real data
+
+Wraps the class to collect field values during normal usage. After enough samples, analyses ranges and cardinality, then rebuilds the class with tighter types (e.g. `int16` instead of `int64`, `float32` instead of `float64`, interning for low-cardinality strings). Call `.apply_optimizations()` on the class to get the rebuilt version — existing instances keep the old layout.
+
+### 6. `memory_report()` — human-readable summary
+
+Prints a bordered table showing bytes before/after, which strategies applied, and per-field storage details. Available as a classmethod on any thriftified class.
 
 ## Limitations
 
-- **Inheritance**: works but parent/child share a single compact buffer. Avoid overriding `__init__` manually in thriftified subclasses.
+- **Inheritance**: parent and child share a single compact buffer for `int`/`float` fields. Bool packing uses independent bit offsets per level, so bools don't collide. Avoid overriding `__init__` manually in thriftified subclasses.
+- **String interning**: high-cardinality strings (timestamps, UUIDs, unique messages) accumulate in the intern table forever — they're never GC'd. Disable with `intern_strings=False` for such fields.
 - **Overflow**: `int` values beyond `int64` range (±9.2×10¹⁸) raise `struct.error`. Enable `check_overflow=True` for early detection.
 - **Dataclass**: works when `@thrift` is placed **above** `@dataclass` (`@thrift` / `@dataclass`). The opposite order may fail because thrift modifies annotations before dataclass processes them.
 - The adaptive monitor rebuilds the class via a *new* type — existing instances keep the old layout. Call `apply_optimizations()` before creating production instances.
