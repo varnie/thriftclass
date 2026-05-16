@@ -114,25 +114,25 @@ Output:
 
 ```
 ┌──────────────────────────────────────────────────────────┐
-│  thriftclass — Node                                    │
+│  thriftclass — Node                                      │
 ├──────────────────────────────────────────────────────────┤
 │  Memory per instance:                                    │
 │    Before :   344 bytes                                  │
-│    After  :   173 bytes                                  │
-│    Saved  :   171 bytes  (49.7%)                       │
+│    After  :   214 bytes                                  │
+│    Saved  :   130 bytes  (37.8%)                         │
 ├──────────────────────────────────────────────────────────┤
 │  Optimizations applied:                                  │
-│      ✓  __slots__           eliminates per-object __dict__│
-│      ✓  compact ints/floats  stores int/float in a bytearray buffer│
-│      ✓  bool → bitfield     packs bool fields into one int│
-│      ✓  str interning       shared string objects for repeated values│
+│    ✓  __slots__           eliminates per-object __dict__ │
+│    ✓  compact ints/floats  stored in bytearray buffer    │
+│    ✓  bool → bitfield     packs bool fields into one int │
+│    ✓  str interning       interned strings share memory  │
 ├──────────────────────────────────────────────────────────┤
 │  Fields:                                                 │
-│      x               → stored as float64                 │
-│      y               → stored as float64                 │
-│      visited         → packed into bitfield              │
-│      label           → interned                          │
-│      depth           → stored as int64                   │
+│    x               → float64 (8 bytes in buffer)         │
+│    y               → float64 (8 bytes in buffer)         │
+│    visited         → packed into bitfield                │
+│    label           → interned                            │
+│    depth           → int64 (8 bytes in buffer)           │
 └──────────────────────────────────────────────────────────┘
 ```
 

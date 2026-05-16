@@ -40,7 +40,7 @@ after.visited = False; after.active = True
 after.label = "node_a"; after.depth = 5
 
 print(f"  Before : {_deep_size(before)} bytes")
-print(f"  After  : {_deep_size(after)} bytes  (slots, bitfield bools, compact ints/floats)")
+print(f"  After  : {_deep_size(after)} bytes  (__slots__, bool packing, compact fields)")
 print(f"  has __slots__  : {hasattr(Node, '__slots__')}")
 print(f"  bool packed    : {hasattr(after, '_bool_flags')}")
 print(f"  visited        : {after.visited}  active: {after.active}")

@@ -85,7 +85,7 @@ def apply_compact_fields(cls: Type, annotations: dict, config, compact_overrides
 
     for name, (type_name, fmt) in compact_fields.items():
         sz = struct.calcsize(fmt)
-        opts[name] = f"stored as {type_name} ({sz} bytes in buffer)"
+        opts[name] = f"{type_name} ({sz} bytes in buffer)"
         descriptors_info.append((name, fmt, buf_offset))
         buf_offset += sz
 

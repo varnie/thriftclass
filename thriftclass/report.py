@@ -7,11 +7,11 @@ from dataclasses import dataclass, field
 
 
 STRATEGY_LABELS = {
-    "slots":           ("__slots__",         "eliminates per-object __dict__"),
-    "bool_packing":    ("bool → bitfield",    "packs bool fields into one int"),
-    "string_interning":("str interning",      "shared string objects for repeated values"),
-    "compact_ints":    ("compact ints/floats", "stores int/float in a bytearray buffer"),
-    "adaptive":        ("adaptive monitor",   "learns from real data to suggest optimizations"),
+    "slots":           ("__slots__",           "eliminates per-object __dict__"),
+    "bool_packing":    ("bool → bitfield",     "packs bool fields into one int"),
+    "string_interning":("str interning",       "interned strings share memory"),
+    "compact_ints":    ("compact ints/floats", "stored in bytearray buffer"),
+    "adaptive":        ("adaptive monitor",    "learns from real data to suggest types"),
 }
 
 
@@ -42,46 +42,44 @@ class MemoryReport:
         sep = "─" * width
         lines = []
 
+        def pad(s):
+            return f"{s:<{width}.{width}}"
+
         lines.append(f"┌{sep}┐")
-        lines.append(f"│  thriftclass — {self.class_name:<{width - 18}}│")
+        lines.append(f"│{pad(f'  thriftclass — {self.class_name}')}│")
         lines.append(f"├{sep}┤")
 
-        # Size summary
         if self.original_size and self.optimized_size:
-            lines.append(f"│  Memory per instance:                                    │")
-            lines.append(f"│    Before : {self.original_size:>5} bytes                                  │")
-            lines.append(f"│    After  : {self.optimized_size:>5} bytes                                  │")
+            lines.append(f"│{pad('  Memory per instance:')}│")
+            lines.append(f"│{pad(f'    Before : {self.original_size:>5} bytes')}│")
+            lines.append(f"│{pad(f'    After  : {self.optimized_size:>5} bytes')}│")
             if self.saved_bytes:
-                lines.append(f"│    Saved  : {self.saved_bytes:>5} bytes  ({self.saved_percent}%)                       │")
+                lines.append(f"│{pad(f'    Saved  : {self.saved_bytes:>5} bytes  ({self.saved_percent}%)')}│")
             else:
-                lines.append(f"│    (size estimation requires dummy-constructable class)  │")
+                lines.append(f"│{pad('  (size estimation requires dummy-constructable class)')}│")
         else:
-            lines.append(f"│  (size estimation not available for this class type)     │")
+            lines.append(f"│{pad('  (size estimation not available for this class type)')}│")
 
         lines.append(f"├{sep}┤")
 
-        # Strategies
-        lines.append(f"│  Optimizations applied:                                  │")
+        lines.append(f"│{pad('  Optimizations applied:')}│")
         if self.strategies:
             for s in self.strategies:
                 label, desc = STRATEGY_LABELS.get(s, (s, ""))
-                row = f"    ✓  {label:<18}  {desc}"
-                lines.append(f"│  {row:<{width - 2}}│")
+                lines.append(f"│{pad(f'    ✓  {label:<18}  {desc}')}│")
         else:
-            lines.append(f"│    (none)                                                │")
+            lines.append(f"│{pad('    (none)')}│")
 
-        # Field details
         if self.field_info:
             has_any = any(v.get("optimizations") for v in self.field_info.values())
             if has_any:
                 lines.append(f"├{sep}┤")
-                lines.append(f"│  Fields:                                                 │")
+                lines.append(f"│{pad('  Fields:')}│")
                 for fname, info in self.field_info.items():
                     opts = info.get("optimizations", [])
                     if opts:
                         opt_str = ", ".join(opts)
-                        row = f"    {fname:<14}  → {opt_str}"
-                        lines.append(f"│  {row:<{width - 2}}│")
+                        lines.append(f"│{pad(f'    {fname:<14}  → {opt_str}')}│")
 
         lines.append(f"└{sep}┘")
         return "\n".join(lines)
