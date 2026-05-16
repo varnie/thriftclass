@@ -473,6 +473,97 @@ class TestInheritance:
         assert b.x == 5
 
 
+# ─── Kwargs for plain classes (H1) ────────────────────────────────────────────
+
+class TestPlainClassKwargs:
+    def test_compact_kwargs_work(self):
+        @thrift
+        class Item:
+            x: int
+            y: float
+
+        obj = Item(x=5, y=3.14)
+        assert obj.x == 5
+        assert abs(obj.y - 3.14) < 1e-12
+
+    def test_mixed_kwargs_work(self):
+        @thrift
+        class Item:
+            x: int
+            name: str
+            active: bool
+            visible: bool
+
+        obj = Item(x=42, name="hello", active=True, visible=False)
+        assert obj.x == 42
+        assert obj.name == "hello"
+        assert obj.active is True
+        assert obj.visible is False
+
+
+# ─── Inheritance compact fields (H2) ─────────────────────────────────────────
+
+class TestInheritanceCompactFields:
+    def test_parent_values_preserved_after_child_init(self):
+        @thrift
+        class Base:
+            x: int
+
+        @thrift
+        class Child(Base):
+            y: int
+
+        c = Child()
+        c.x = 10
+        c.y = 20
+        assert c.x == 10
+        assert c.y == 20
+
+    def test_child_does_not_wipe_parent_buffer(self):
+        @thrift
+        class Base:
+            x: int
+
+        @thrift
+        class Child(Base):
+            y: int
+
+        c = Child(x=10, y=20)
+        assert c.x == 10
+        assert c.y == 20
+
+
+# ─── Compact type checks (M1) ────────────────────────────────────────────────
+
+class TestCompactTypeChecks:
+    def test_wrong_type_raises_typeerror(self):
+        @thrift
+        class Item:
+            count: int
+
+        obj = Item()
+        with pytest.raises(TypeError):
+            obj.count = "not a number"
+
+    def test_correct_type_works(self):
+        @thrift
+        class Item:
+            count: int
+
+        obj = Item()
+        obj.count = 42
+        assert obj.count == 42
+
+    def test_wrong_float_type_raises_typeerror(self):
+        @thrift
+        class Item:
+            val: float
+
+        obj = Item()
+        with pytest.raises(TypeError):
+            obj.val = [1.0, 2.0]
+
+
 # ─── Overflow ─────────────────────────────────────────────────────────────────
 
 class TestOverflow:

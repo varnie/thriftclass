@@ -146,14 +146,14 @@ def _apply_thrift(cls: Type[T], config: ThriftConfig, compact_overrides: dict | 
         for f in str_fields:
             field_info[f]["optimizations"].append("interned")
 
-    # 5. Adaptive monitor
+    meta.optimized_size = _estimate_size(new_cls, annotations)
+
+    # 5. Adaptive monitor (after size estimation to avoid contamination)
     if config.adaptive:
         monitor = AdaptiveMonitor(new_cls, config, annotations)
         new_cls = monitor.wrap(new_cls)
         meta._adaptive_monitor = monitor
         meta.strategies_applied.append("adaptive")
-
-    meta.optimized_size = _estimate_size(new_cls, annotations)
     meta._field_info = field_info
 
     new_cls.__thrift_meta__ = meta

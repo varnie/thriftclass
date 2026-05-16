@@ -43,13 +43,23 @@ def _make_compact_descriptor(name: str, fmt: str, offset: int, check_overflow: b
 
         def setter(self, value):
             _check_overflow(value, fmt)
-            buf = object.__getattribute__(self, "__compact_buffer__")
-            struct.pack_into(fmt, buf, offset, value)
+            try:
+                buf = object.__getattribute__(self, "__compact_buffer__")
+                struct.pack_into(fmt, buf, offset, value)
+            except struct.error:
+                raise TypeError(
+                    f"Expected a numeric value for compact field '{name}', got {type(value).__name__}"
+                )
     else:
 
         def setter(self, value):
-            buf = object.__getattribute__(self, "__compact_buffer__")
-            struct.pack_into(fmt, buf, offset, value)
+            try:
+                buf = object.__getattribute__(self, "__compact_buffer__")
+                struct.pack_into(fmt, buf, offset, value)
+            except struct.error:
+                raise TypeError(
+                    f"Expected a numeric value for compact field '{name}', got {type(value).__name__}"
+                )
 
     return property(getter, setter, doc=f"Compact field '{name}' ({fmt})")
 
@@ -129,13 +139,18 @@ def apply_compact_fields(cls: Type, annotations: dict, config, compact_overrides
         try:
             buf = object.__getattribute__(self, "__compact_buffer__")
             if len(buf) < total_buffer_size:
-                object.__setattr__(self, "__compact_buffer__", bytearray(total_buffer_size))
+                old = buf
+                buf = bytearray(total_buffer_size)
+                buf[:len(old)] = old
+                object.__setattr__(self, "__compact_buffer__", buf)
         except AttributeError:
             object.__setattr__(self, "__compact_buffer__", bytearray(total_buffer_size))
         if original_init:
             original_init(self, *args, **kwargs)
         elif parent_cls.__init__ is not object.__init__:
             parent_cls.__init__(self, *args)
+        for key, val in kwargs.items():
+            setattr(self, key, val)
 
     new_cls.__init__ = compact_init
 
