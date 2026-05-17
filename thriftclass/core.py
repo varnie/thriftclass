@@ -159,7 +159,7 @@ def _apply_thrift(cls: Type[T], config: ThriftConfig, compact_overrides: dict | 
     new_cls.__thrift_meta__ = meta
     new_cls.__thrift_config__ = config
     new_cls.memory_report = classmethod(lambda cls_: meta.report())
-    new_cls.apply_optimizations = classmethod(lambda cls_: _apply_optimizations(cls, meta))
+    new_cls.optimize = classmethod(lambda cls_: _apply_optimizations(cls, meta))
 
     return new_cls
 

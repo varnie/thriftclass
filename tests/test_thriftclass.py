@@ -691,7 +691,7 @@ class TestDataclassCustomMethods:
         assert p.magnitude() == 5.0
 
 
-# ─── Adaptive apply_optimizations ─────────────────────────────────────────────
+# ─── Adaptive optimize ────────────────────────────────────────────────────────
 
 class TestAdaptiveApply:
     def test_apply_optimizations_returns_optimized(self):

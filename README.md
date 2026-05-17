@@ -73,7 +73,7 @@ for _ in range(120):
 report = HttpRequest.__adaptive_monitor__.get_report()
 
 # rebuild with optimal types (int16, float32, etc.)
-HttpRequest = HttpRequest.apply_optimizations()
+HttpRequest = HttpRequest.optimize()
 ```
 
 ### Dataclass support
@@ -154,7 +154,7 @@ Patches `__setattr__` and `__init__` in-place (no class recreation, avoiding `__
 
 ### 5. Adaptive monitor — learns from real data
 
-Wraps the class to collect field values during normal usage. After enough samples, analyses ranges and cardinality, then rebuilds the class with tighter types (e.g. `int16` instead of `int64`, `float32` instead of `float64`, interning for low-cardinality strings). Call `.apply_optimizations()` on the class to get the rebuilt version — existing instances keep the old layout.
+Wraps the class to collect field values during normal usage. After enough samples, analyses ranges and cardinality, then rebuilds the class with tighter types (e.g. `int16` instead of `int64`, `float32` instead of `float64`, interning for low-cardinality strings). Call `.optimize()` on the class to get the rebuilt version — existing instances keep the old layout.
 
 ### 6. `memory_report()` — human-readable summary
 
@@ -166,7 +166,7 @@ Prints a bordered table showing bytes before/after, which strategies applied, an
 - **String interning**: high-cardinality strings (timestamps, UUIDs, unique messages) accumulate in the intern table forever — they're never GC'd. Disable with `intern_strings=False` for such fields.
 - **Overflow**: `int` values beyond `int64` range (±9.2×10¹⁸) raise `struct.error`. Enable `check_overflow=True` for early detection.
 - **Dataclass**: works when `@thrift` is placed **above** `@dataclass` (`@thrift` / `@dataclass`). The opposite order may fail because thrift modifies annotations before dataclass processes them.
-- The adaptive monitor rebuilds the class via a *new* type — existing instances keep the old layout. Call `apply_optimizations()` before creating production instances.
+- The adaptive monitor rebuilds the class via a *new* type — existing instances keep the old layout. Call `.optimize()` before creating production instances.
 
 ## Tests
 

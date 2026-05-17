@@ -70,6 +70,10 @@ class MemoryReport:
         else:
             lines.append(f"│{pad('    (none)')}│")
 
+        if "adaptive" in self.strategies:
+            lines.append(f"├{sep}┤")
+            lines.append(f"│{pad(f'  ▶  Call {self.class_name}.optimize() to apply recommendations')}│")
+
         if self.field_info:
             has_any = any(v.get("optimizations") for v in self.field_info.values())
             if has_any:
