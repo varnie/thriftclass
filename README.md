@@ -4,11 +4,7 @@ Automatic memory optimization for Python classes. Apply `@thrift` and get `__slo
 
 ## Install
 
-```bash
-pip install thriftclass
-```
-
-Or copy `thriftclass/` into your project.
+copy `thriftclass/` into your project.
 
 ## Quick start
 
