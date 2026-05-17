@@ -34,32 +34,37 @@ def _check_overflow(value, fmt):
             )
 
 
+def _fmt_to_type_name(fmt: str) -> str:
+    for name, fmt_c, _, _ in INT_TIERS:
+        if fmt_c == fmt:
+            return name
+    if fmt == "f":
+        return "float32"
+    if fmt == "d":
+        return "float64"
+    return fmt
+
+
 def _make_compact_descriptor(name: str, fmt: str, offset: int, check_overflow: bool):
     def getter(self):
         buf = object.__getattribute__(self, "__compact_buffer__")
         return struct.unpack_from(fmt, buf, offset)[0]
 
-    if check_overflow:
-
-        def setter(self, value):
+    def setter(self, value):
+        if not isinstance(value, (int, float)):
+            raise TypeError(
+                f"Expected a numeric value for compact field '{name}', got {type(value).__name__}"
+            )
+        if check_overflow:
             _check_overflow(value, fmt)
-            try:
-                buf = object.__getattribute__(self, "__compact_buffer__")
-                struct.pack_into(fmt, buf, offset, value)
-            except struct.error:
-                raise TypeError(
-                    f"Expected a numeric value for compact field '{name}', got {type(value).__name__}"
-                )
-    else:
-
-        def setter(self, value):
-            try:
-                buf = object.__getattribute__(self, "__compact_buffer__")
-                struct.pack_into(fmt, buf, offset, value)
-            except struct.error:
-                raise TypeError(
-                    f"Expected a numeric value for compact field '{name}', got {type(value).__name__}"
-                )
+        try:
+            buf = object.__getattribute__(self, "__compact_buffer__")
+            struct.pack_into(fmt, buf, offset, value)
+        except struct.error:
+            type_name = _fmt_to_type_name(fmt)
+            raise OverflowError(
+                f"Value {value} out of range for compact field '{name}' ({type_name})"
+            )
 
     return property(getter, setter, doc=f"Compact field '{name}' ({fmt})")
 
@@ -134,6 +139,7 @@ def apply_compact_fields(cls: Type, annotations: dict, config, compact_overrides
     new_cls.__compact_buffer_size__ = total_buffer_size
 
     parent_cls = cls.__bases__[0] if cls.__bases__ else object
+    all_compact_names = compact_names
 
     def compact_init(self, *args, **kwargs):
         try:
@@ -148,9 +154,10 @@ def apply_compact_fields(cls: Type, annotations: dict, config, compact_overrides
         if original_init:
             original_init(self, *args, **kwargs)
         elif parent_cls.__init__ is not object.__init__:
-            parent_cls.__init__(self, *args)
+            parent_cls.__init__(self, *args, **kwargs)
         for key, val in kwargs.items():
-            setattr(self, key, val)
+            if key in all_compact_names or original_init is None:
+                setattr(self, key, val)
 
     new_cls.__init__ = compact_init
 

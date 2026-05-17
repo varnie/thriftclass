@@ -82,7 +82,7 @@ def _make_init(original_init, bool_fields: list[str], bit_map: dict[str, int], c
 
     def __init__(self, *args, **kwargs):
         if parent_cls and parent_cls.__init__ is not object.__init__:
-            parent_cls.__init__(self, *args)
+            parent_cls.__init__(self, *args, **kwargs)
         if not has_bool_ancestor:
             object.__setattr__(self, "_bool_flags", 0)
         if original_init:

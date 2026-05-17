@@ -585,6 +585,93 @@ class TestOverflow:
         obj.val = 2 ** 62
         assert obj.val == 2 ** 62
 
+    def test_overflow_out_of_range_raises_overflowerror(self):
+        @thrift(check_overflow=False)
+        class Item:
+            val: int
+
+        obj = Item()
+        with pytest.raises(OverflowError):
+            obj.val = 2 ** 63
+
+    def test_overflow_ok_for_float64_large_value(self):
+        @thrift(compact_ints=False, compact_floats=True)
+        class Item:
+            val: float
+
+        obj = Item()
+        obj.val = 1e40
+        assert obj.val == 1e40
+
+    def test_overflow_wrong_type_raises_typeerror(self):
+        @thrift(check_overflow=False)
+        class Item:
+            val: int
+
+        obj = Item()
+        with pytest.raises(TypeError):
+            obj.val = "not a number"
+
+    def test_overflow_wrong_float_type_raises_typeerror(self):
+        @thrift(compact_ints=False, compact_floats=True)
+        class Item:
+            val: float
+
+        obj = Item()
+        with pytest.raises(TypeError):
+            obj.val = [1.0, 2.0]
+
+
+# ─── Parent kwargs forwarding ─────────────────────────────────────────────────
+
+class TestParentKwargsForwarding:
+    def test_child_kwargs_forwarded_to_parent_compact(self):
+        @thrift
+        class Base:
+            x: int
+
+        @thrift
+        class Child(Base):
+            y: int
+
+        c = Child(x=10, y=20)
+        assert c.x == 10
+        assert c.y == 20
+
+    def test_child_kwargs_forwarded_to_parent_bool(self):
+        @thrift
+        class Base:
+            flag_a: bool
+            flag_b: bool
+
+        @thrift
+        class Child(Base):
+            extra: int
+
+        c = Child(flag_a=True, flag_b=False, extra=99)
+        assert c.flag_a is True
+        assert c.flag_b is False
+        assert c.extra == 99
+
+    def test_child_kwargs_forwarded_to_parent_compact_bool_mixed(self):
+        @thrift
+        class Base:
+            x: int
+            flag_a: bool
+            flag_b: bool
+
+        @thrift
+        class Child(Base):
+            y: int
+            flag_c: bool
+
+        c = Child(x=1, y=2, flag_a=True, flag_b=False, flag_c=True)
+        assert c.x == 1
+        assert c.y == 2
+        assert c.flag_a is True
+        assert c.flag_b is False
+        assert c.flag_c is True
+
 
 # ─── Dataclass custom methods ─────────────────────────────────────────────────
 
