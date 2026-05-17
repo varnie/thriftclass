@@ -2,10 +2,18 @@
 
 Automatic memory optimization for Python classes. Apply `@thrift` and get `__slots__`, packed bools, interned strings, and compact int/float storage — no manual refactoring.
 
-## Install
+## Installation
 
 ```bash
-pip install -e ".[dev]"
+pip install git+https://github.com/varnie/thriftclass.git
+```
+
+Or from a local clone:
+
+```bash
+git clone https://github.com/varnie/thriftclass.git
+cd thriftclass
+pip install .
 ```
 
 ## Quick start
