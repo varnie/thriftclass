@@ -1,0 +1,11 @@
+[project]
+name = "thriftclass"
+version = "0.1.0"
+description = "Automatic memory optimization for Python classes"
+requires-python = ">=3.10"
+
+[project.optional-dependencies]
+dev = ["pytest"]
+
+[project.urls]
+Source = "https://github.com/varnie/thriftclass"

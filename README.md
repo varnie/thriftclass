@@ -4,7 +4,9 @@ Automatic memory optimization for Python classes. Apply `@thrift` and get `__slo
 
 ## Install
 
-copy `thriftclass/` into your project.
+```bash
+pip install -e ".[dev]"
+```
 
 ## Quick start
 
@@ -171,5 +173,6 @@ Prints a bordered table showing bytes before/after, which strategies applied, an
 ## Tests
 
 ```bash
+pip install -e ".[dev]"
 python -m pytest tests/ -v
 ```
