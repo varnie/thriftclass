@@ -48,6 +48,21 @@ Point.memory_report().show()
 | Compact floats | on | Stores `float` fields in a `bytearray` buffer instead of Python objects (24→8 bytes each) |
 | Adaptive | off | Monitors real data, then reports — or auto-applies — optimal types (e.g. `int16` instead of `int64`) |
 
+## ⚠️ Performance Trade-off (CPU vs RAM)
+
+`thriftclass` is a **memory-first** library. By replacing standard Python attributes with properties backed by `bytearray` and `struct.pack`, it drastically reduces RAM usage but introduces a CPU overhead on attribute access (getter/setter). 
+
+* **RAM:** Up to 40-60% savings for large collections of objects.
+* **CPU:** Attribute reads/writes are 2-4x slower than standard `__slots__`. 
+
+Always benchmark your specific use case to ensure the CPU overhead is acceptable for your performance budget.
+
+## 🎯 When to Use?
+
+* **✅ YES:** You have millions of tiny, interconnected objects with complex logic (e.g., in-memory graphs, game entity trees, custom caches) and your app is hitting RAM limits.
+* **❌ NO (Simple Data Transfer):** For regular API payloads or configuration, prefer standard `dataclasses.dataclass(slots=True)` or `pydantic`.
+* **❌ NO (Heavy Math/Matrices):** If you are doing heavy numeric matrix calculations, use `numpy` or `pandas`. They store data in pure C-arrays much more efficiently and perform operations at native C speed.
+
 ## Configuration
 
 ```python
