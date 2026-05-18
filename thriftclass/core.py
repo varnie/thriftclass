@@ -4,15 +4,14 @@ Core decorator and configuration for thriftclass.
 
 from __future__ import annotations
 
-import sys
 import dataclasses
-from dataclasses import dataclass, field
-from typing import Any, Type, TypeVar, overload
+from dataclasses import dataclass
+from typing import Any, TypeVar, overload
 
 from .strategies.slots import apply_slots
 from .strategies.bools import apply_bool_packing
 from .strategies.strings import apply_string_interning
-from .strategies.compacts import apply_compact_fields, classify_int_range
+from .strategies.compacts import apply_compact_fields
 from .strategies.adaptive import AdaptiveMonitor
 from .report import MemoryReport
 from .utils import deep_size, get_annotations
@@ -56,7 +55,7 @@ class ThriftMeta:
 
 
 @overload
-def thrift(cls: Type[T]) -> Type[T]: ...
+def thrift(cls: type[T]) -> type[T]: ...
 @overload
 def thrift(
     *,
@@ -73,7 +72,7 @@ def thrift(
 
 
 def thrift(
-    cls: Type[T] | None = None,
+    cls: type[T] | None = None,
     *,
     slots: bool = True,
     pack_bools: bool = True,
@@ -97,7 +96,7 @@ def thrift(
         profile=profile,
     )
 
-    def decorator(cls: Type[T]) -> Type[T]:
+    def decorator(cls: type[T]) -> type[T]:
         return _apply_thrift(cls, config)
 
     if cls is not None:
@@ -107,11 +106,14 @@ def thrift(
     return decorator
 
 
-def _apply_thrift(cls: Type[T], config: ThriftConfig, compact_overrides: dict | None = None) -> Type[T]:
+def _apply_thrift(cls: type[T], config: ThriftConfig,
+                  compact_overrides: dict | None = None) -> type[T]:
     """Apply all configured optimizations to a class."""
     meta = ThriftMeta(cls, config)
     annotations = get_annotations(cls)
-    field_info: dict[str, dict] = {name: {"type": t, "optimizations": []} for name, t in annotations.items()}
+    field_info: dict[str, dict] = {
+        name: {"type": t, "optimizations": []} for name, t in annotations.items()
+    }
 
     if config.profile:
         meta.original_size = _estimate_size(cls, annotations)
@@ -125,7 +127,9 @@ def _apply_thrift(cls: Type[T], config: ThriftConfig, compact_overrides: dict | 
 
     # 2. Compact ints/floats (removes int/float from slots, adds __compact_buffer__)
     if config.compact_ints or config.compact_floats:
-        new_cls, compact_opts = apply_compact_fields(new_cls, annotations, config, compact_overrides)
+        new_cls, compact_opts = apply_compact_fields(
+            new_cls, annotations, config, compact_overrides
+        )
         if compact_opts:
             meta.strategies_applied.append("compact_ints")
             for f, opt in compact_opts.items():
@@ -174,7 +178,7 @@ def _apply_thrift(cls: Type[T], config: ThriftConfig, compact_overrides: dict | 
     return new_cls
 
 
-def _apply_thrift_with_overrides(cls: Type[T], config_overrides: dict, type_map: dict) -> Type[T]:
+def _apply_thrift_with_overrides(cls: type[T], config_overrides: dict, type_map: dict) -> type[T]:
     """Re-apply thrift with specific compact type overrides (used by adaptive monitor)."""
     config = ThriftConfig(**config_overrides)
     return _apply_thrift(cls, config, compact_overrides=type_map)
@@ -182,7 +186,6 @@ def _apply_thrift_with_overrides(cls: Type[T], config_overrides: dict, type_map:
 
 def _apply_optimizations(cls, meta: ThriftMeta):
     """Rebuild class with adaptive recommendations applied."""
-    from .strategies.adaptive import AdaptiveMonitor
     monitor = getattr(cls, "__adaptive_monitor__", None)
     if monitor is None:
         return cls
@@ -219,20 +222,15 @@ def _apply_optimizations(cls, meta: ThriftMeta):
     return _apply_thrift_with_overrides(meta.original_cls, overrides, type_map)
 
 
-def _estimate_size(cls: Type, annotations: dict) -> int:
+_DUMMY_VALUES = {
+    int: 0, float: 0.0, str: "", bool: False,
+    "int": 0, "float": 0.0, "str": "", "bool": False,
+}
+
+
+def _estimate_size(cls: type, annotations: dict) -> int:
     try:
-        dummy_kwargs = {}
-        for name, t in annotations.items():
-            if t is int or t == "int":
-                dummy_kwargs[name] = 0
-            elif t is float or t == "float":
-                dummy_kwargs[name] = 0.0
-            elif t is str or t == "str":
-                dummy_kwargs[name] = ""
-            elif t is bool or t == "bool":
-                dummy_kwargs[name] = False
-            else:
-                dummy_kwargs[name] = None
+        dummy_kwargs = {name: _DUMMY_VALUES.get(t, None) for name, t in annotations.items()}
 
         if dataclasses.is_dataclass(cls):
             obj = cls(**dummy_kwargs)

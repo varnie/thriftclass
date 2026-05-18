@@ -7,12 +7,12 @@ by eliminating the per-object dictionary.
 
 from __future__ import annotations
 import dataclasses
-from typing import Type, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 
 
-def apply_slots(cls: Type[T], annotations: dict) -> Type[T]:
+def apply_slots(cls: type[T], annotations: dict) -> type[T]:
     """
     Rebuild the class with __slots__ defined.
     Handles plain classes, dataclasses.
@@ -27,7 +27,7 @@ def apply_slots(cls: Type[T], annotations: dict) -> Type[T]:
     return _slots_for_plain_class(cls, annotations)
 
 
-def _slots_for_plain_class(cls: Type[T], annotations: dict) -> Type[T]:
+def _slots_for_plain_class(cls: type[T], annotations: dict) -> type[T]:
     """Rebuild a plain class with __slots__."""
     slot_names = list(annotations.keys())
 
@@ -49,38 +49,33 @@ def _slots_for_plain_class(cls: Type[T], annotations: dict) -> Type[T]:
     return new_cls
 
 
-def _slots_for_dataclass(cls: Type[T], annotations: dict) -> Type[T]:
-    import sys
+def _slots_for_dataclass(cls: type[T], annotations: dict) -> type[T]:
 
-    if sys.version_info >= (3, 10):
-        raw_fields = {f.name: f for f in dataclasses.fields(cls)}
+    raw_fields = {f.name: f for f in dataclasses.fields(cls)}
 
-        field_defs = {}
-        for name, f in raw_fields.items():
-            if f.default is not dataclasses.MISSING:
-                field_defs[name] = dataclasses.field(default=f.default)
-            elif f.default_factory is not dataclasses.MISSING:
-                field_defs[name] = dataclasses.field(default_factory=f.default_factory)
-            else:
-                field_defs[name] = dataclasses.field()
+    field_defs = {}
+    for name, f in raw_fields.items():
+        if f.default is not dataclasses.MISSING:
+            field_defs[name] = dataclasses.field(default=f.default)
+        elif f.default_factory is not dataclasses.MISSING:
+            field_defs[name] = dataclasses.field(default_factory=f.default_factory)
+        else:
+            field_defs[name] = dataclasses.field()
 
-        base_ns = {"__annotations__": annotations, **field_defs}
-        new_cls = type(cls.__name__, cls.__bases__, base_ns)
-        new_cls = dataclasses.dataclass(new_cls, slots=True)
+    base_ns = {"__annotations__": annotations, **field_defs}
+    new_cls = type(cls.__name__, cls.__bases__, base_ns)
+    new_cls = dataclasses.dataclass(new_cls, slots=True)
 
-        for key, val in vars(cls).items():
-            if key.startswith("__") and key.endswith("__"):
-                continue
-            if key in raw_fields:
-                continue
-            try:
-                setattr(new_cls, key, val)
-            except (AttributeError, TypeError):
-                pass
+    for key, val in vars(cls).items():
+        if key.startswith("__") and key.endswith("__"):
+            continue
+        if key in raw_fields:
+            continue
+        try:
+            setattr(new_cls, key, val)
+        except (AttributeError, TypeError):
+            pass
 
-        new_cls.__module__ = cls.__module__
-        new_cls.__qualname__ = cls.__qualname__
-        return new_cls
-    else:
-        return _slots_for_plain_class(cls, annotations)
-        
+    new_cls.__module__ = cls.__module__
+    new_cls.__qualname__ = cls.__qualname__
+    return new_cls

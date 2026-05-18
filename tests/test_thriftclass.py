@@ -3,11 +3,10 @@ Tests for thriftclass.
 Run with: python -m pytest tests/ -v
 """
 
-import sys
 import dataclasses
 import pytest
 
-from thriftclass import thrift, ThriftConfig
+from thriftclass import thrift
 
 
 # ─── Plain class ──────────────────────────────────────────────────────────────
@@ -58,8 +57,8 @@ class TestBoolPacking:
             visible: bool
 
         f = Flags()
-        assert f.active == False
-        assert f.visible == False
+        assert not f.active
+        assert not f.visible
 
     def test_bool_set_get(self):
         @thrift
@@ -73,9 +72,9 @@ class TestBoolPacking:
         f.visible = False
         f.deleted = True
 
-        assert f.active == True
-        assert f.visible == False
-        assert f.deleted == True
+        assert f.active
+        assert not f.visible
+        assert f.deleted
 
     def test_bools_independent(self):
         @thrift
@@ -94,11 +93,11 @@ class TestBoolPacking:
         f.d = False
         f.e = True
 
-        assert f.a == True
-        assert f.b == False
-        assert f.c == True
-        assert f.d == False
-        assert f.e == True
+        assert f.a
+        assert not f.b
+        assert f.c
+        assert not f.d
+        assert f.e
 
     def test_single_bool_not_packed(self):
         """Single bool field should not be packed (no benefit, added complexity)."""
@@ -111,7 +110,7 @@ class TestBoolPacking:
         s = Single()
         # Just check it works
         s.active = True
-        assert s.active == True
+        assert s.active
 
     def test_bool_toggle(self):
         @thrift
@@ -121,9 +120,9 @@ class TestBoolPacking:
 
         f = Flags()
         f.active = True
-        assert f.active == True
+        assert f.active
         f.active = False
-        assert f.active == False
+        assert not f.active
 
 
 # ─── String interning ─────────────────────────────────────────────────────────
@@ -423,7 +422,7 @@ class TestCompactFields:
         obj.active = True
         assert not hasattr(obj, "__compact_buffer__")
         assert obj.name == "test"
-        assert obj.active == True
+        assert obj.active
 
 
 # ─── Inheritance ──────────────────────────────────────────────────────────────
@@ -458,8 +457,8 @@ class TestInheritance:
         c.flag_a = True
         c.flag_b = False
         c.extra = 99
-        assert c.flag_a == True
-        assert c.flag_b == False
+        assert c.flag_a
+        assert not c.flag_b
         assert c.extra == 99
 
     def test_inheritance_parent_independent(self):

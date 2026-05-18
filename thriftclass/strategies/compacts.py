@@ -1,5 +1,4 @@
 import struct
-from typing import Type
 
 INT_TIERS = [
     ("int8",   "b", -128,          127),
@@ -46,9 +45,10 @@ def _fmt_to_type_name(fmt: str) -> str:
 
 
 def _make_compact_descriptor(name: str, fmt: str, offset: int, check_overflow: bool):
+    st = struct.Struct(fmt)
+
     def getter(self):
-        buf = object.__getattribute__(self, "__compact_buffer__")
-        return struct.unpack_from(fmt, buf, offset)[0]
+        return st.unpack_from(object.__getattribute__(self, "__compact_buffer__"), offset)[0]
 
     def setter(self, value):
         if not isinstance(value, (int, float)):
@@ -58,8 +58,7 @@ def _make_compact_descriptor(name: str, fmt: str, offset: int, check_overflow: b
         if check_overflow:
             _check_overflow(value, fmt)
         try:
-            buf = object.__getattribute__(self, "__compact_buffer__")
-            struct.pack_into(fmt, buf, offset, value)
+            st.pack_into(object.__getattribute__(self, "__compact_buffer__"), offset, value)
         except struct.error:
             type_name = _fmt_to_type_name(fmt)
             raise OverflowError(
@@ -74,7 +73,8 @@ def _get_parent_buffer_size(cls):
     return find_ancestor_attr(cls, "__compact_buffer_size__") or 0
 
 
-def apply_compact_fields(cls: Type, annotations: dict, config, compact_overrides: dict | None = None) -> tuple[Type, dict]:
+def apply_compact_fields(cls: type, annotations: dict, config,
+                         compact_overrides: dict | None = None) -> tuple[type, dict]:
     compact_fields = {}
     for name, t in annotations.items():
         if not config.compact_ints and not config.compact_floats:
@@ -96,10 +96,10 @@ def apply_compact_fields(cls: Type, annotations: dict, config, compact_overrides
     descriptors_info = []
 
     for name, (type_name, fmt) in compact_fields.items():
-        sz = struct.calcsize(fmt)
-        opts[name] = f"{type_name} ({sz} bytes in buffer)"
+        st = struct.Struct(fmt)
+        opts[name] = f"{type_name} ({st.size} bytes in buffer)"
         descriptors_info.append((name, fmt, buf_offset))
-        buf_offset += sz
+        buf_offset += st.size
 
     total_buffer_size = buf_offset
     compact_names = set(compact_fields.keys())

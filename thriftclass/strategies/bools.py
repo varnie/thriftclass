@@ -6,7 +6,7 @@ Access is transparent — fields still behave like normal bools.
 """
 
 from __future__ import annotations
-from typing import Type, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 
@@ -26,7 +26,8 @@ def _get_parent_bit_count(cls):
     return 0
 
 
-def apply_bool_packing(cls: Type[T], bool_fields: list[str], annotations: dict, slots_enabled: bool = True) -> Type[T]:
+def apply_bool_packing(cls: type[T], bool_fields: list[str],
+                       annotations: dict, slots_enabled: bool = True) -> type[T]:
     bit_offset = _get_parent_bit_count(cls)
     bit_map: dict[str, int] = {name: bit_offset + i for i, name in enumerate(bool_fields)}
 

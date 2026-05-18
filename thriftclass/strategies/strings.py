@@ -11,12 +11,12 @@ Patches __init__ and __setattr__ IN-PLACE to avoid __slots__ conflicts.
 
 from __future__ import annotations
 import sys
-from typing import Type, TypeVar
+from typing import TypeVar
 
 T = TypeVar("T")
 
 
-def apply_string_interning(cls: Type[T], str_fields: list[str]) -> Type[T]:
+def apply_string_interning(cls: type[T], str_fields: list[str]) -> type[T]:
     """
     Patches __init__ and __setattr__ on the class in-place to intern strings.
     Does not recreate the class — avoids __slots__ conflicts.
@@ -28,16 +28,6 @@ def apply_string_interning(cls: Type[T], str_fields: list[str]) -> Type[T]:
     cls.__setattr__ = _make_setattr(original_setattr, str_fields)
     cls.__thrift_intern_fields__ = str_fields  # type: ignore
     return cls
-
-
-def _intern_value(value):
-    """Intern a string value if possible."""
-    if isinstance(value, str):
-        try:
-            return sys.intern(value)
-        except TypeError:
-            return value
-    return value
 
 
 def _make_init(original_init, str_fields: list[str], cls=None):

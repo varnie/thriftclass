@@ -2,12 +2,10 @@
 
 from __future__ import annotations
 import sys
-import inspect
-import dataclasses
-from typing import Type, get_type_hints
+from typing import get_type_hints
 
 
-def get_annotations(cls: Type) -> dict[str, type]:
+def get_annotations(cls: type) -> dict[str, type]:
     """
     Extract field annotations from a class, handling dataclasses,
     Pydantic models, and plain classes.
@@ -30,11 +28,6 @@ def get_annotations(cls: Type) -> dict[str, type]:
         k: v for k, v in getattr(cls, "__annotations__", {}).items()
         if not k.startswith("_")
     }
-
-
-def get_size(obj) -> int:
-    """Get memory size of an object in bytes (shallow)."""
-    return sys.getsizeof(obj)
 
 
 def deep_size(obj, seen=None) -> int:
@@ -61,18 +54,6 @@ def deep_size(obj, seen=None) -> int:
     return size
 
 
-def is_dataclass(cls: Type) -> bool:
-    return dataclasses.is_dataclass(cls)
-
-
-def is_pydantic(cls: Type) -> bool:
-    try:
-        from pydantic import BaseModel
-        return issubclass(cls, BaseModel)
-    except ImportError:
-        return False
-
-
 def find_ancestor_attr(cls, attr_name):
     """Walk MRO (excluding cls) and return first ancestor's attribute value."""
     for ancestor in cls.__mro__[1:]:
@@ -80,14 +61,3 @@ def find_ancestor_attr(cls, attr_name):
         if val is not None:
             return val
     return None
-
-
-def copy_class_attributes(src, dst):
-    """Copy methods and class attributes from src to dst, skipping dunder conflicts."""
-    for name, val in vars(src).items():
-        if name.startswith("__") and name.endswith("__"):
-            continue
-        try:
-            setattr(dst, name, val)
-        except (AttributeError, TypeError):
-            pass

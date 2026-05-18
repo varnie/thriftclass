@@ -54,7 +54,8 @@ class MemoryReport:
             lines.append(f"│{pad(f'    Before : {self.original_size:>5} bytes')}│")
             lines.append(f"│{pad(f'    After  : {self.optimized_size:>5} bytes')}│")
             if self.saved_bytes:
-                lines.append(f"│{pad(f'    Saved  : {self.saved_bytes:>5} bytes  ({self.saved_percent}%)')}│")
+                saved_str = f'{self.saved_bytes:>5} bytes  ({self.saved_percent}%)'
+                lines.append(f"│{pad(f'    Saved  : {saved_str}')}│")
             else:
                 lines.append(f"│{pad('  (size estimation requires dummy-constructable class)')}│")
         else:
@@ -72,7 +73,8 @@ class MemoryReport:
 
         if "adaptive" in self.strategies:
             lines.append(f"├{sep}┤")
-            lines.append(f"│{pad(f'  ▶  Call {self.class_name}.optimize() to apply recommendations')}│")
+            msg = f'  ▶  Call {self.class_name}.optimize() to apply recommendations'
+            lines.append(f"│{pad(msg)}│")
 
         if self.field_info:
             has_any = any(v.get("optimizations") for v in self.field_info.values())

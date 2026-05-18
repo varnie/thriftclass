@@ -1,6 +1,5 @@
-import sys
 from collections import Counter
-from typing import Type, TypeVar, TYPE_CHECKING
+from typing import TypeVar, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ..core import ThriftConfig
@@ -12,7 +11,7 @@ MIN_SAMPLES = 50
 
 
 class AdaptiveMonitor:
-    def __init__(self, cls: Type, config: "ThriftConfig", annotations: dict):
+    def __init__(self, cls: type, config: "ThriftConfig", annotations: dict):
         self.cls = cls
         self.config = config
         self.annotations = annotations
@@ -42,7 +41,7 @@ class AdaptiveMonitor:
     def sample_count(self) -> int:
         return len(self._seen_instances)
 
-    def wrap(self, cls: Type[T]) -> Type[T]:
+    def wrap(self, cls: type[T]) -> type[T]:
         monitor = self
         original_setattr = cls.__dict__.get("__setattr__")
 
