@@ -1,5 +1,10 @@
 # thriftclass
 
+> **Status: experimental — proof of concept.**  
+> This is a research exploration. The API is unstable, multiple
+> inheritance is unsupported, and critical bugs may still exist.
+> Not recommended for production use.
+
 Automatic memory optimization for Python classes. Apply `@thrift` and get `__slots__`, packed bools, interned strings, and compact int/float storage — no manual refactoring.
 
 ## Installation
