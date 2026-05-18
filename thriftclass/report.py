@@ -95,11 +95,4 @@ class MemoryReport:
             f"strategies={self.strategies})"
         )
 
-    def adaptive_report(self) -> None:
-        """
-        Print adaptive monitor findings if available on the class.
-        Call after creating enough instances.
-        """
-        # We can't access the class here directly, but this can be called
-        # via Class.__thrift_meta__.report().adaptive_report()
-        print("(call YourClass.__adaptive_monitor__.get_report() for adaptive insights)")
+

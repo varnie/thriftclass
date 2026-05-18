@@ -11,15 +11,22 @@ from typing import Type, TypeVar
 T = TypeVar("T")
 
 
-def _get_parent_bit_count(cls):
+def _ancestor_has_slot(cls, name):
     for ancestor in cls.__mro__[1:]:
-        bm = getattr(ancestor, "__thrift_bit_map__", None)
-        if bm:
-            return max(bm.values()) + 1
+        if name in getattr(ancestor, "__slots__", ()):
+            return True
+    return False
+
+
+def _get_parent_bit_count(cls):
+    from ..utils import find_ancestor_attr
+    bm = find_ancestor_attr(cls, "__thrift_bit_map__")
+    if bm:
+        return max(bm.values()) + 1
     return 0
 
 
-def apply_bool_packing(cls: Type[T], bool_fields: list[str], annotations: dict) -> Type[T]:
+def apply_bool_packing(cls: Type[T], bool_fields: list[str], annotations: dict, slots_enabled: bool = True) -> Type[T]:
     bit_offset = _get_parent_bit_count(cls)
     bit_map: dict[str, int] = {name: bit_offset + i for i, name in enumerate(bool_fields)}
 
@@ -33,13 +40,14 @@ def apply_bool_packing(cls: Type[T], bool_fields: list[str], annotations: dict) 
             continue
         namespace[key] = val
 
-    old_slots = list(getattr(cls, "__slots__", ()))
-    if old_slots:
-        new_slots = [s for s in old_slots if s not in bool_fields]
-        if "_bool_flags" not in [s for s in (getattr(b, '__slots__', ()) for b in cls.__mro__[1:]) for s in s]:
-            if "_bool_flags" not in new_slots:
-                new_slots.append("_bool_flags")
-        namespace["__slots__"] = tuple(new_slots)
+    if slots_enabled:
+        old_slots = list(getattr(cls, "__slots__", ()))
+        if old_slots:
+            new_slots = [s for s in old_slots if s not in bool_fields]
+            if not _ancestor_has_slot(cls, "_bool_flags"):
+                if "_bool_flags" not in new_slots:
+                    new_slots.append("_bool_flags")
+            namespace["__slots__"] = tuple(new_slots)
 
     for name, bit in bit_map.items():
         namespace[name] = _make_bool_property(name, bit)
@@ -79,6 +87,7 @@ def _make_init(original_init, bool_fields: list[str], bit_map: dict[str, int], c
     has_bool_ancestor = any(
         getattr(b, "__thrift_bit_map__", None) for b in (cls.__mro__[1:] if cls else ())
     )
+    bool_field_set = set(bool_fields)
 
     def __init__(self, *args, **kwargs):
         if parent_cls and parent_cls.__init__ is not object.__init__:
@@ -87,6 +96,10 @@ def _make_init(original_init, bool_fields: list[str], bit_map: dict[str, int], c
             object.__setattr__(self, "_bool_flags", 0)
         if original_init:
             original_init(self, *args, **kwargs)
-        for key, val in kwargs.items():
-            setattr(self, key, val)
+            for key, val in kwargs.items():
+                if key in bool_field_set:
+                    setattr(self, key, val)
+        else:
+            for key, val in kwargs.items():
+                setattr(self, key, val)
     return __init__

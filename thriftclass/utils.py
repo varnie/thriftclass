@@ -73,6 +73,15 @@ def is_pydantic(cls: Type) -> bool:
         return False
 
 
+def find_ancestor_attr(cls, attr_name):
+    """Walk MRO (excluding cls) and return first ancestor's attribute value."""
+    for ancestor in cls.__mro__[1:]:
+        val = getattr(ancestor, attr_name, None)
+        if val is not None:
+            return val
+    return None
+
+
 def copy_class_attributes(src, dst):
     """Copy methods and class attributes from src to dst, skipping dunder conflicts."""
     for name, val in vars(src).items():

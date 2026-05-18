@@ -24,25 +24,25 @@ def classify_int_range(min_val: int, max_val: int):
     return "int64", "q"
 
 
+FMT_TO_RANGE = {fmt: (lo, hi) for _, fmt, lo, hi in INT_TIERS}
+INT_FMT_TO_NAME = {fmt: name for name, fmt, _, _ in INT_TIERS}
+FLOAT_FMT_TO_NAME = {"f": "float32", "d": "float64"}
+
+
 def _check_overflow(value, fmt):
-    for name, fmt_c, lo, hi in INT_TIERS:
-        if fmt_c == fmt:
-            if lo <= value <= hi:
-                return
-            raise OverflowError(
-                f"Value {value} out of range for {name} ({lo}..{hi})"
-            )
+    result = FMT_TO_RANGE.get(fmt)
+    if result is None:
+        return
+    lo, hi = result
+    if not (lo <= value <= hi):
+        name = INT_FMT_TO_NAME[fmt]
+        raise OverflowError(
+            f"Value {value} out of range for {name} ({lo}..{hi})"
+        )
 
 
 def _fmt_to_type_name(fmt: str) -> str:
-    for name, fmt_c, _, _ in INT_TIERS:
-        if fmt_c == fmt:
-            return name
-    if fmt == "f":
-        return "float32"
-    if fmt == "d":
-        return "float64"
-    return fmt
+    return INT_FMT_TO_NAME.get(fmt, FLOAT_FMT_TO_NAME.get(fmt, fmt))
 
 
 def _make_compact_descriptor(name: str, fmt: str, offset: int, check_overflow: bool):
@@ -70,11 +70,8 @@ def _make_compact_descriptor(name: str, fmt: str, offset: int, check_overflow: b
 
 
 def _get_parent_buffer_size(cls):
-    for ancestor in cls.__mro__[1:]:
-        size = getattr(ancestor, "__compact_buffer_size__", None)
-        if size is not None:
-            return size
-    return 0
+    from ..utils import find_ancestor_attr
+    return find_ancestor_attr(cls, "__compact_buffer_size__") or 0
 
 
 def apply_compact_fields(cls: Type, annotations: dict, config, compact_overrides: dict | None = None) -> tuple[Type, dict]:
@@ -117,11 +114,12 @@ def apply_compact_fields(cls: Type, annotations: dict, config, compact_overrides
             continue
         namespace[key] = val
 
-    old_slots = list(getattr(cls, "__slots__", ()))
-    new_slots = [s for s in old_slots if s not in compact_names]
-    if "__compact_buffer__" not in new_slots:
-        new_slots.append("__compact_buffer__")
-    namespace["__slots__"] = tuple(new_slots)
+    if getattr(config, "slots", True):
+        old_slots = list(getattr(cls, "__slots__", ()))
+        new_slots = [s for s in old_slots if s not in compact_names]
+        if "__compact_buffer__" not in new_slots:
+            new_slots.append("__compact_buffer__")
+        namespace["__slots__"] = tuple(new_slots)
 
     check_overflow = getattr(config, "check_overflow", False)
     for name, fmt, offset in descriptors_info:

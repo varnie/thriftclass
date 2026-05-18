@@ -113,7 +113,8 @@ def _apply_thrift(cls: Type[T], config: ThriftConfig, compact_overrides: dict | 
     annotations = get_annotations(cls)
     field_info: dict[str, dict] = {name: {"type": t, "optimizations": []} for name, t in annotations.items()}
 
-    meta.original_size = _estimate_size(cls, annotations)
+    if config.profile:
+        meta.original_size = _estimate_size(cls, annotations)
 
     new_cls = cls
 
@@ -133,7 +134,7 @@ def _apply_thrift(cls: Type[T], config: ThriftConfig, compact_overrides: dict | 
     # 3. Bool packing (removes bools from slots, packs into _bool_flags)
     bool_fields = [name for name, t in annotations.items() if t is bool or t == "bool"]
     if config.pack_bools and len(bool_fields) >= 2:
-        new_cls = apply_bool_packing(new_cls, bool_fields, annotations)
+        new_cls = apply_bool_packing(new_cls, bool_fields, annotations, slots_enabled=config.slots)
         meta.strategies_applied.append("bool_packing")
         for f in bool_fields:
             field_info[f]["optimizations"].append("packed into bitfield")
@@ -146,7 +147,8 @@ def _apply_thrift(cls: Type[T], config: ThriftConfig, compact_overrides: dict | 
         for f in str_fields:
             field_info[f]["optimizations"].append("interned")
 
-    meta.optimized_size = _estimate_size(new_cls, annotations)
+    if config.profile:
+        meta.optimized_size = _estimate_size(new_cls, annotations)
 
     # 5. Adaptive monitor (after size estimation to avoid contamination)
     if config.adaptive:
@@ -159,7 +161,15 @@ def _apply_thrift(cls: Type[T], config: ThriftConfig, compact_overrides: dict | 
     new_cls.__thrift_meta__ = meta
     new_cls.__thrift_config__ = config
     new_cls.memory_report = classmethod(lambda cls_: meta.report())
-    new_cls.optimize = classmethod(lambda cls_: _apply_optimizations(cls, meta))
+    def _optimize(cls):
+        """Rebuild class with adaptive recommendations applied.
+
+        Call after the monitor has collected enough samples.
+        Returns a new class with narrower compact types (e.g. int16, float32)
+        based on observed field ranges. Existing instances keep the old layout.
+        """
+        return _apply_optimizations(cls, meta)
+    new_cls.optimize = classmethod(_optimize)
 
     return new_cls
 

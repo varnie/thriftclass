@@ -266,8 +266,11 @@ class TestConfig:
             y: float
 
         p = Plain()
-        # Without slots, __dict__ should exist
-        assert hasattr(p, "__dict__") or True  # just don't crash
+        assert hasattr(p, "__dict__")
+        p.x = 1.0
+        p.y = 2.0
+        assert p.x == 1.0
+        assert p.y == 2.0
 
     def test_disable_bool_packing(self):
         @thrift(pack_bools=False)
@@ -585,6 +588,15 @@ class TestOverflow:
         obj.val = 2 ** 62
         assert obj.val == 2 ** 62
 
+    def test_check_overflow_true_raises(self):
+        @thrift(check_overflow=True)
+        class Item:
+            val: int
+
+        obj = Item()
+        with pytest.raises(OverflowError):
+            obj.val = 2 ** 63
+
     def test_overflow_out_of_range_raises_overflowerror(self):
         @thrift(check_overflow=False)
         class Item:
@@ -694,7 +706,7 @@ class TestDataclassCustomMethods:
 # ─── Adaptive optimize ────────────────────────────────────────────────────────
 
 class TestAdaptiveApply:
-    def test_apply_optimizations_returns_optimized(self):
+    def test_optimize_returns_optimized_class(self):
         @thrift(adaptive=True, adaptive_sample=5)
         class Request:
             code: int
@@ -705,10 +717,28 @@ class TestAdaptiveApply:
             r.code = 200
             r.value = float(i) * 0.5
 
-        monitor = getattr(Request, "__adaptive_monitor__", None)
-        assert monitor is not None
-        report = monitor.get_report()
-        assert report["analysis_complete"]
+        Optimized = Request.optimize()
+        assert Optimized is not Request
+        assert hasattr(Optimized, "__compact_buffer_size__")
+        assert hasattr(Optimized, "__slots__")
+
+    def test_optimize_new_instances_use_compact_storage(self):
+        @thrift(adaptive=True, adaptive_sample=5)
+        class Request:
+            code: int
+            value: float
+
+        for i in range(10):
+            r = Request()
+            r.code = 200
+            r.value = float(i) * 0.5
+
+        Optimized = Request.optimize()
+        obj = Optimized()
+        obj.code = 200
+        obj.value = 1.5
+        assert obj.code == 200
+        assert obj.value == 1.5
 
 
 if __name__ == "__main__":

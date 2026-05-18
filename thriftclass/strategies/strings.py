@@ -55,7 +55,7 @@ def _make_init(original_init, str_fields: list[str], cls=None):
             for key, val in kwargs.items():
                 object.__setattr__(self, key, val)
             if parent_cls and parent_cls.__init__ is not object.__init__:
-                parent_cls.__init__(self, *args)
+                parent_cls.__init__(self, *args, **kwargs)
 
         for fname in str_fields:
             try:
