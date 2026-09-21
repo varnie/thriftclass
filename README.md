@@ -1,11 +1,9 @@
 # thriftclass
 
-> **Status: experimental — proof of concept.**  
-> This is a research exploration. The API is unstable, multiple
-> inheritance is unsupported, and critical bugs may still exist.
-> Not recommended for production use.
-
-Automatic memory optimization for Python classes. Apply `@thrift` and get `__slots__`, packed bools, interned strings, and compact int/float storage — no manual refactoring.
+Experimental memory optimization for annotated Python classes. `@thrift` combines
+slots, compact numeric storage, boolean bitfields, and string interning. It trades
+CPU time for potential memory savings; benchmark your actual object population.
+Requires Python 3.10+ and has no runtime dependencies.
 
 ## Installation
 
@@ -13,11 +11,9 @@ Automatic memory optimization for Python classes. Apply `@thrift` and get `__slo
 pip install git+https://github.com/varnie/thriftclass.git
 ```
 
-Or from a local clone:
+From a local checkout:
 
 ```bash
-git clone https://github.com/varnie/thriftclass.git
-cd thriftclass
 pip install .
 ```
 
@@ -26,181 +22,223 @@ pip install .
 ```python
 from thriftclass import thrift
 
+
 @thrift
 class Point:
     x: float
     y: float
-    label: str
-    active: bool
-    visible: bool
+    label: str = "origin"
+    active: bool = True
+    visible: bool = False
 
-p = Point()
-p.x = 1.0; p.y = 2.0
-p.label = "origin"
-p.active = True; p.visible = False
 
+p = Point(x=1.0, y=2.0)
+assert (p.x, p.y, p.label, p.active) == (1.0, 2.0, "origin", True)
+p.x = 3.0
 Point.memory_report().show()
 ```
 
-## Optimizations
+Plain classes without an initializer accept annotated field names as keyword
+arguments. Unknown keywords and positional arguments raise `TypeError`. A custom
+initializer retains its argument handling and runs once; its results are not
+replaced with the original keyword values afterward.
 
-| Strategy | Default | Effect |
-|---|---|---|
-| `__slots__` | on | Eliminates per-instance `__dict__` (~200+ bytes saved) |
-| Bool packing | on | Packs multiple `bool` fields into a single integer bitfield |
-| String interning | on | Deduplicates repeated string values via `sys.intern()` |
-| Compact ints | on | Stores `int` fields in a `bytearray` buffer instead of Python objects (28→8 bytes each) |
-| Compact floats | on | Stores `float` fields in a `bytearray` buffer instead of Python objects (24→8 bytes each) |
-| Adaptive | off | Monitors real data, then reports — or auto-applies — optimal types (e.g. `int16` instead of `int64`) |
-
-## ⚠️ Performance Trade-off (CPU vs RAM)
-
-`thriftclass` is a **memory-first** library. By replacing standard Python attributes with properties backed by `bytearray` and `struct.pack`, it drastically reduces RAM usage but introduces a CPU overhead on attribute access (getter/setter). 
-
-* **RAM:** Up to 40-60% savings for large collections of objects.
-* **CPU:** Attribute reads/writes are 2-4x slower than standard `__slots__`. 
-
-Always benchmark your specific use case to ensure the CPU overhead is acceptable for your performance budget.
-
-## 🎯 When to Use?
-
-* **✅ YES:** You have millions of tiny, interconnected objects with complex logic (e.g., in-memory graphs, game entity trees, custom caches) and your app is hitting RAM limits.
-* **❌ NO (Simple Data Transfer):** For regular API payloads or configuration, prefer standard `dataclasses.dataclass(slots=True)` or `pydantic`.
-* **❌ NO (Heavy Math/Matrices):** If you are doing heavy numeric matrix calculations, use `numpy` or `pandas`. They store data in pure C-arrays much more efficiently and perform operations at native C speed.
+Declared defaults are preserved. Undeclared defaults for compact numbers are
+zero, and packed booleans start false. Other fields without defaults remain
+unset until assigned. `ClassVar` and dataclass `InitVar` annotations do not
+become instance slots.
 
 ## Configuration
 
 ```python
-@thrift(slots=True, pack_bools=True, intern_strings=True,
-        compact_ints=True, compact_floats=True)
-class MyClass:
-    ...
-
-@thrift(slots=False)          # disable __slots__
-@thrift(pack_bools=False)     # keep bools as regular attributes
-@thrift(compact_ints=False)   # keep ints as Python objects
-@thrift(compact_floats=False) # keep floats as Python objects
-@thrift(check_overflow=True)  # raise OverflowError on int out of range
+@thrift(
+    slots=True,
+    pack_bools=True,
+    intern_strings=True,
+    compact_ints=True,
+    compact_floats=True,
+    check_overflow=False,
+    adaptive=False,
+    adaptive_sample=500,
+    profile=True,
+)
+class Record:
+    count: int
+    value: float
 ```
 
-### Adaptive mode
+| Option | Behavior |
+| --- | --- |
+| `slots` | Allocate slots for annotated instance fields; an inherited instance dictionary cannot be removed. |
+| `pack_bools` | Store two or more newly declared bool fields in a shared integer bitfield. Subclasses can extend an existing bitfield with one field. Setters use truth-value conversion. |
+| `intern_strings` | Intern exact `str` values on annotated string fields. String subclasses retain their type and are not interned. |
+| `compact_ints` | Store integers in signed 64-bit fields initially; values must support integer indexing. Floats are rejected with `TypeError`. |
+| `compact_floats` | Store Python `int`/`float` values as 64-bit floats. |
+| `check_overflow` | Retained for compatibility. Integer range checks now always run before writing, so overflow cannot corrupt the previous value. |
+| `adaptive` | Collect a bounded sample of successful assignments to each numeric/string field. |
+| `adaptive_sample` | Positive integer specifying observations per monitored field, not the number of distinct instances. |
+| `profile` | Produce a synthetic size estimate without executing the class constructor. Disable to skip profiling work. |
+
+Out-of-range integers raise `OverflowError`; invalid input types raise
+`TypeError`. An unsuccessful numeric assignment leaves the prior value intact.
+Infinities and NaNs remain valid float64 values. Fixed-width storage cannot
+represent arbitrary-sized Python integers; disable `compact_ints` if needed.
+
+## Dataclasses and inheritance
+
+Apply `@thrift` above `@dataclass`:
+
+```python
+from dataclasses import dataclass, field
+
+
+@thrift
+@dataclass(frozen=True, kw_only=True)
+class Config:
+    port: int = 8080
+    host: str = "localhost"
+    tags: list = field(default_factory=list, compare=False)
+
+
+config = Config(port=443)
+```
+
+The decorator preserves generated initializers, `__post_init__`, default
+factories, field metadata, keyword-only parameters, comparison options, and
+frozen behavior. Shallow copies share ordinary mutable user fields, as usual,
+but have independent compact numeric buffers. Frozen dataclasses support
+copying and pickling when their class is importable by module name.
+
+Single inheritance is supported, including explicit `super().__init__()` and
+zero-argument `super()` in methods. Thriftified descendants reuse one numeric
+buffer and bitfield, with distinct offsets for new fields. Initializers follow
+normal Python inheritance rules: a custom child initializer must call its
+parent when that initialization is required.
+
+Existing inherited optimizations remain active even if a subclass disables a
+strategy. Multiple inheritance, redeclaring inherited instance fields, and
+annotated custom descriptors are rejected with `TypeError`.
+
+## Adaptive mode
 
 ```python
 @thrift(adaptive=True, adaptive_sample=100)
-class HttpRequest:
-    method: str
+class Request:
     status: int
     duration: float
-    path: str
 
-# create real instances — the monitor collects statistics
-for _ in range(120):
-    r = HttpRequest()
-    r.method = ...
-    ...
 
-# view analysis
-report = HttpRequest.__adaptive_monitor__.get_report()
+for i in range(100):
+    Request(status=200 + i % 2, duration=0.1)
 
-# rebuild with optimal types (int16, float32, etc.)
-HttpRequest = HttpRequest.optimize()
+report = Request.__adaptive_monitor__.get_report()
+assert report["analysis_complete"]
+OptimizedRequest = Request.optimize()
 ```
 
-### Dataclass support
+Sampling stops independently for each monitored field after its quota. A field
+that is never assigned prevents completion; `.optimize()` returns the existing
+class until every field has enough observations. Reports include per-field
+assignment counts, and `samples_collected` is the minimum of those counts.
+Repeated writes to the same instance count as observations. Failed writes do not.
+Frozen dataclass construction records final field values once per initializer.
+
+The monitor retains at most `adaptive_sample` distinct strings per string field,
+integer ranges, and a running maximum for floats. It does not retain instances,
+object IDs, or lists of float samples. Reads of the report do not end sampling.
+
+`.optimize()` returns a new class with narrower integer storage based on observed
+ranges and declared integer defaults. Existing instances keep their layout.
+Future outliers raise `OverflowError`; samples cannot guarantee future ranges.
+Float storage remains float64 to preserve precision, and disabled strategies
+stay disabled. String recommendations are informational, not automatically
+applied. No optimization runs automatically in the background.
+
+## Memory reporting
 
 ```python
-from dataclasses import dataclass
+from thriftclass.utils import deep_size
 
-@thrift
-@dataclass
-class Config:
-    host: str = "localhost"
-    port: int = 8080
-    debug: bool = False
-    verbose: bool = False
+objects = [Point(x=float(i), y=float(i + 1)) for i in range(1000)]
+print(deep_size(objects))
 ```
 
-## Memory report
+`deep_size()` follows builtin containers, instance dictionaries, and slots across
+the inheritance chain. It handles cycles and counts shared objects once within
+one traversal. It approximates retained Python-object memory; it is not process
+RSS and excludes allocator fragmentation, class/function graphs, and external
+allocations.
 
-```python
-@thrift
-class Node:
-    x: float
-    y: float
-    z: float
-    visited: bool
-    active: bool
-    label: str
-    depth: int
+`memory_report()` uses synthetic field values and includes buffer overhead.
+It is a layout estimate, not a prediction for your production data. Missing
+estimates are `None`; negative `saved_bytes`/`saved_percent` mean an increase.
+Use `deep_size()` on a representative collection to account for shared strings
+and other shared values across instances.
 
-Node.memory_report().show()
+## Performance
+
+The decorator builds each class layout once. Numeric properties use cached
+`struct.Struct` objects; inheritance does not duplicate storage slots. Attribute
+access and construction still cost more CPU time than ordinary slots.
+
+The included benchmark creates 10,000 objects with three floats, an integer,
+two booleans, and a label drawn from ten string values. One local CPython 3.12.13
+run produced:
+
+| Layout | Retained collection bytes | Construction | Float read | Float write |
+| --- | ---: | ---: | ---: | ---: |
+| Instance dictionary | 3,325,545 | 9.8 ms | 64 ns | 130 ns |
+| Standard dataclass slots | 2,445,232 | 10.0 ms | 63 ns | 117 ns |
+| `thriftclass` | 1,535,684 | 109.9 ms | 228 ns | 845 ns |
+
+For this workload, thrift used about 37% less retained memory than slots, with
+roughly 11× construction cost and 4–7× attribute-access cost. These are local
+measurements, not guarantees. Timings include Python call overhead; see the
+benchmark for the complete methodology. Small classes or already-shared values
+can consume **more** memory after packing because each buffer has overhead.
+
+Run it after installing the checkout:
+
+```bash
+python benchmarks/benchmark.py --instances 10000 --operations 100000
 ```
-
-Output:
-
-```
-┌──────────────────────────────────────────────────────────┐
-│  thriftclass — Node                                      │
-├──────────────────────────────────────────────────────────┤
-│  Memory per instance:                                    │
-│    Before :   344 bytes                                  │
-│    After  :   214 bytes                                  │
-│    Saved  :   130 bytes  (37.8%)                         │
-├──────────────────────────────────────────────────────────┤
-│  Optimizations applied:                                  │
-│    ✓  __slots__           eliminates per-object __dict__ │
-│    ✓  compact ints/floats  stored in bytearray buffer    │
-│    ✓  bool → bitfield     packs bool fields into one int │
-│    ✓  str interning       interned strings share memory  │
-├──────────────────────────────────────────────────────────┤
-│  Fields:                                                 │
-│    x               → float64 (8 bytes in buffer)         │
-│    y               → float64 (8 bytes in buffer)         │
-│    visited         → packed into bitfield                │
-│    label           → interned                            │
-│    depth           → int64 (8 bytes in buffer)           │
-└──────────────────────────────────────────────────────────┘
-```
-
-## How it works
-
-Six strategies run in sequence, each transforming the class and passing it to the next:
-
-### 1. `__slots__` — eliminates `__dict__`
-
-Recreates the class via `type(name, bases, namespace)` with `__slots__` set to all annotated field names. The per-instance `__dict__` (~40% of instance memory) is removed. Old class members are copied into the new namespace. For dataclasses on Python 3.10+, uses `dataclass(slots=True)` to preserve defaults.
-
-### 2. Compact storage — `int`/`float` → bytearray buffer
-
-Each `int`/`float` field becomes a `property` whose getter/setter call `struct.pack_into`/`unpack_from` on a shared `bytearray`. A Python `int` (~28 B) becomes an 8‑byte `int64`; a `float` (~24 B) becomes an 8‑byte `float64`. The buffer is lazily initialized on first access with resize-if-too-small logic for inheritance. Field order and offset tracking ensure parent and child fields don't overlap.
-
-### 3. Bool packing — N bools → 1 bitfield
-
-Bool slots are replaced with `property` descriptors that read/write individual bits of a single `_bool_flags` integer slot via bitmasks (`self._bool_flags |= 1 << bit`). Inheritance assigns unique bit offsets per level by querying the parent's `__thrift_bit_map__`, so child bits don't collide with parent bits. Only classes with ≥2 bool fields are packed.
-
-### 4. String interning — deduplicates strings
-
-Patches `__setattr__` and `__init__` in-place (no class recreation, avoiding `__slots__` conflicts). Every string value assigned to an interned field is run through `sys.intern()`, so identical strings (e.g. `"INFO"` across thousands of log entries) share one object. Safe for low-cardinality fields; high-cardinality fields (timestamps, UUIDs) leak memory since interned strings live for the process lifetime.
-
-### 5. Adaptive monitor — learns from real data
-
-Wraps the class to collect field values during normal usage. After enough samples, analyses ranges and cardinality, then rebuilds the class with tighter types (e.g. `int16` instead of `int64`, `float32` instead of `float64`, interning for low-cardinality strings). Call `.optimize()` on the class to get the rebuilt version — existing instances keep the old layout.
-
-### 6. `memory_report()` — human-readable summary
-
-Prints a bordered table showing bytes before/after, which strategies applied, and per-field storage details. Available as a classmethod on any thriftified class.
 
 ## Limitations
 
-- **Inheritance**: parent and child share a single compact buffer for `int`/`float` fields. Bool packing uses independent bit offsets per level, so bools don't collide. Avoid overriding `__init__` manually in thriftified subclasses.
-- **String interning**: high-cardinality strings (timestamps, UUIDs, unique messages) accumulate in the intern table forever — they're never GC'd. Disable with `intern_strings=False` for such fields.
-- **Overflow**: `int` values beyond `int64` range (±9.2×10¹⁸) raise `struct.error`. Enable `check_overflow=True` for early detection.
-- **Dataclass**: works when `@thrift` is placed **above** `@dataclass` (`@thrift` / `@dataclass`). The opposite order may fail because thrift modifies annotations before dataclass processes them.
-- The adaptive monitor rebuilds the class via a *new* type — existing instances keep the old layout. Call `.optimize()` before creating production instances.
+- This remains an experimental proof of concept with an unstable API.
+- Decoration returns a new class, even with `slots=False`. References to the
+  original class are not updated. Class creation hooks may run again; custom
+  metaclasses, framework models, and custom serialization protocols are not
+  generally supported.
+- Annotation resolution can fail for local forward references. Unresolved
+  fields remain ordinary storage instead of receiving numeric optimization.
+- Slot-based layouts reject undeclared attributes and generally remove weak
+  references unless an existing or inherited weak-reference slot is present.
+- `__compact_buffer__`, `_bool_flags`, `__compact_buffer_size__`,
+  `__adaptive_monitor__`, `memory_report`, and `optimize` are reserved. Other
+  `__thrift_*` attributes are implementation metadata.
+- String interning is useful only when values repeat. High-cardinality values
+  still incur lookup overhead and need representative memory measurements;
+  interning does not promise a particular object lifetime across Python versions.
+- Individual adaptive observations are synchronized; compound updates to user
+  fields and packed booleans are not an application-level concurrency guarantee.
+- Disabling a strategy is often the best optimization when its CPU or memory
+  overhead outweighs the measured benefit.
 
-## Tests
+## Development
 
 ```bash
 pip install -e ".[dev]"
 python -m pytest tests/ -v
+ruff check .
+ruff format --check .
+python demo.py
 ```
+
+CI runs tests on Python 3.10–3.13. Regression coverage includes constructor
+behavior, defaults, dataclass options, inheritance, `super()`, numeric errors,
+copy/pickle behavior, memory accounting, and bounded adaptive sampling.
+
+## License
+
+MIT

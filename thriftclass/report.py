@@ -7,11 +7,11 @@ from dataclasses import dataclass, field
 
 
 STRATEGY_LABELS = {
-    "slots":           ("__slots__",           "eliminates per-object __dict__"),
-    "bool_packing":    ("bool → bitfield",     "packs bool fields into one int"),
-    "string_interning":("str interning",       "interned strings share memory"),
-    "compact_ints":    ("compact ints/floats", "stored in bytearray buffer"),
-    "adaptive":        ("adaptive monitor",    "learns from real data to suggest types"),
+    "slots": ("__slots__", "eliminates per-object __dict__"),
+    "bool_packing": ("bool → bitfield", "packs bool fields into one int"),
+    "string_interning": ("str interning", "interned strings share memory"),
+    "compact_ints": ("compact ints/floats", "stored in bytearray buffer"),
+    "adaptive": ("adaptive monitor", "learns from real data to suggest types"),
 }
 
 
@@ -19,16 +19,20 @@ STRATEGY_LABELS = {
 class MemoryReport:
     class_name: str
     strategies: list[str]
-    original_size: int
-    optimized_size: int
+    original_size: int | None
+    optimized_size: int | None
     field_info: dict[str, dict] = field(default_factory=dict)
 
     @property
-    def saved_bytes(self) -> int:
-        return max(0, self.original_size - self.optimized_size)
+    def saved_bytes(self) -> int | None:
+        if self.original_size is None or self.optimized_size is None:
+            return None
+        return self.original_size - self.optimized_size
 
     @property
-    def saved_percent(self) -> float:
+    def saved_percent(self) -> float | None:
+        if self.saved_bytes is None:
+            return None
         if self.original_size == 0:
             return 0.0
         return round(100 * self.saved_bytes / self.original_size, 1)
@@ -49,15 +53,15 @@ class MemoryReport:
         lines.append(f"│{pad(f'  thriftclass — {self.class_name}')}│")
         lines.append(f"├{sep}┤")
 
-        if self.original_size and self.optimized_size:
-            lines.append(f"│{pad('  Memory per instance:')}│")
+        if self.original_size is not None and self.optimized_size is not None:
+            lines.append(f"│{pad('  Estimated synthetic instance size:')}│")
             lines.append(f"│{pad(f'    Before : {self.original_size:>5} bytes')}│")
             lines.append(f"│{pad(f'    After  : {self.optimized_size:>5} bytes')}│")
             if self.saved_bytes:
-                saved_str = f'{self.saved_bytes:>5} bytes  ({self.saved_percent}%)'
+                saved_str = f"{self.saved_bytes:>5} bytes  ({self.saved_percent}%)"
                 lines.append(f"│{pad(f'    Saved  : {saved_str}')}│")
             else:
-                lines.append(f"│{pad('  (size estimation requires dummy-constructable class)')}│")
+                lines.append(f"│{pad('  No estimated size change')}│")
         else:
             lines.append(f"│{pad('  (size estimation not available for this class type)')}│")
 
@@ -73,7 +77,7 @@ class MemoryReport:
 
         if "adaptive" in self.strategies:
             lines.append(f"├{sep}┤")
-            msg = f'  ▶  Call {self.class_name}.optimize() to apply recommendations'
+            msg = f"  ▶  Call {self.class_name}.optimize() to apply recommendations"
             lines.append(f"│{pad(msg)}│")
 
         if self.field_info:
@@ -96,5 +100,3 @@ class MemoryReport:
             f"saved={self.saved_percent}%, "
             f"strategies={self.strategies})"
         )
-
-

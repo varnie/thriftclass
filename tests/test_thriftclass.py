@@ -11,6 +11,7 @@ from thriftclass import thrift
 
 # ─── Plain class ──────────────────────────────────────────────────────────────
 
+
 class TestSlotsPlainClass:
     def test_slots_added(self):
         @thrift
@@ -36,6 +37,7 @@ class TestSlotsPlainClass:
 
 
 # ─── Bool packing ─────────────────────────────────────────────────────────────
+
 
 class TestBoolPacking:
     def test_bools_packed(self):
@@ -101,6 +103,7 @@ class TestBoolPacking:
 
     def test_single_bool_not_packed(self):
         """Single bool field should not be packed (no benefit, added complexity)."""
+
         @thrift
         class Single:
             active: bool
@@ -126,6 +129,7 @@ class TestBoolPacking:
 
 
 # ─── String interning ─────────────────────────────────────────────────────────
+
 
 class TestStringInterning:
     def test_same_string_is_interned(self):
@@ -153,6 +157,7 @@ class TestStringInterning:
 
 
 # ─── Memory report ────────────────────────────────────────────────────────────
+
 
 class TestMemoryReport:
     def test_report_returns(self):
@@ -197,6 +202,7 @@ class TestMemoryReport:
 
 
 # ─── Dataclass support ────────────────────────────────────────────────────────
+
 
 class TestDataclassSupport:
     def test_dataclass_works(self):
@@ -257,6 +263,7 @@ class TestDataclassSupport:
 
 # ─── Config ───────────────────────────────────────────────────────────────────
 
+
 class TestConfig:
     def test_disable_slots(self):
         @thrift(slots=False)
@@ -297,6 +304,7 @@ class TestConfig:
 
 # ─── Adaptive ─────────────────────────────────────────────────────────────────
 
+
 class TestAdaptive:
     def test_adaptive_collects_samples(self):
         @thrift(adaptive=True, adaptive_sample=10)
@@ -333,7 +341,9 @@ class TestAdaptive:
         assert "samples_collected" in report
         assert "fields" in report
 
+
 # ─── Compact ints/floats ─────────────────────────────────────────────────────
+
 
 class TestCompactFields:
     def test_int_stored_in_buffer(self):
@@ -427,6 +437,7 @@ class TestCompactFields:
 
 # ─── Inheritance ──────────────────────────────────────────────────────────────
 
+
 class TestInheritance:
     def test_basic_inheritance(self):
         @thrift
@@ -477,6 +488,7 @@ class TestInheritance:
 
 # ─── Kwargs for plain classes (H1) ────────────────────────────────────────────
 
+
 class TestPlainClassKwargs:
     def test_compact_kwargs_work(self):
         @thrift
@@ -504,6 +516,7 @@ class TestPlainClassKwargs:
 
 
 # ─── Inheritance compact fields (H2) ─────────────────────────────────────────
+
 
 class TestInheritanceCompactFields:
     def test_parent_values_preserved_after_child_init(self):
@@ -537,6 +550,7 @@ class TestInheritanceCompactFields:
 
 # ─── Compact type checks (M1) ────────────────────────────────────────────────
 
+
 class TestCompactTypeChecks:
     def test_wrong_type_raises_typeerror(self):
         @thrift
@@ -568,6 +582,7 @@ class TestCompactTypeChecks:
 
 # ─── Overflow ─────────────────────────────────────────────────────────────────
 
+
 class TestOverflow:
     def test_no_false_overflow(self):
         @thrift(check_overflow=True)
@@ -575,8 +590,8 @@ class TestOverflow:
             val: int
 
         obj = Item()
-        obj.val = 2 ** 31
-        assert obj.val == 2 ** 31
+        obj.val = 2**31
+        assert obj.val == 2**31
 
     def test_large_int_fits_int64(self):
         @thrift(check_overflow=False)
@@ -584,8 +599,8 @@ class TestOverflow:
             val: int
 
         obj = Item()
-        obj.val = 2 ** 62
-        assert obj.val == 2 ** 62
+        obj.val = 2**62
+        assert obj.val == 2**62
 
     def test_check_overflow_true_raises(self):
         @thrift(check_overflow=True)
@@ -594,7 +609,7 @@ class TestOverflow:
 
         obj = Item()
         with pytest.raises(OverflowError):
-            obj.val = 2 ** 63
+            obj.val = 2**63
 
     def test_overflow_out_of_range_raises_overflowerror(self):
         @thrift(check_overflow=False)
@@ -603,7 +618,7 @@ class TestOverflow:
 
         obj = Item()
         with pytest.raises(OverflowError):
-            obj.val = 2 ** 63
+            obj.val = 2**63
 
     def test_overflow_ok_for_float64_large_value(self):
         @thrift(compact_ints=False, compact_floats=True)
@@ -634,6 +649,7 @@ class TestOverflow:
 
 
 # ─── Parent kwargs forwarding ─────────────────────────────────────────────────
+
 
 class TestParentKwargsForwarding:
     def test_child_kwargs_forwarded_to_parent_compact(self):
@@ -686,6 +702,7 @@ class TestParentKwargsForwarding:
 
 # ─── Dataclass custom methods ─────────────────────────────────────────────────
 
+
 class TestDataclassCustomMethods:
     def test_custom_method_preserved(self):
         @thrift
@@ -695,7 +712,7 @@ class TestDataclassCustomMethods:
             y: float = 0.0
 
             def magnitude(self):
-                return (self.x ** 2 + self.y ** 2) ** 0.5
+                return (self.x**2 + self.y**2) ** 0.5
 
         p = Point(x=3.0, y=4.0)
         assert hasattr(p, "magnitude")
@@ -703,6 +720,7 @@ class TestDataclassCustomMethods:
 
 
 # ─── Adaptive optimize ────────────────────────────────────────────────────────
+
 
 class TestAdaptiveApply:
     def test_optimize_returns_optimized_class(self):

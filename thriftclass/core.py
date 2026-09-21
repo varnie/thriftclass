@@ -1,22 +1,21 @@
-"""
-Core decorator and configuration for thriftclass.
-"""
+"""Decorate annotated classes with a single, consistent storage layout."""
 
 from __future__ import annotations
 
 import dataclasses
+import functools
+import struct
+import sys
+import types
 from dataclasses import dataclass
-from typing import Any, TypeVar, overload
 
-from .strategies.slots import apply_slots
-from .strategies.bools import apply_bool_packing
-from .strategies.strings import apply_string_interning
-from .strategies.compacts import apply_compact_fields
-from .strategies.adaptive import AdaptiveMonitor
 from .report import MemoryReport
+from .strategies.adaptive import AdaptiveMonitor
+from .strategies.bools import make_bool_property
+from .strategies.compacts import SAFE_DEFAULTS, _make_compact_descriptor, classify_int_range
+from .strategies.slots import copy_instance, instance_state, rebuild_class, restore_state
+from .strategies.strings import apply_string_interning
 from .utils import deep_size, get_annotations
-
-T = TypeVar("T")
 
 
 @dataclass
@@ -31,226 +30,273 @@ class ThriftConfig:
     adaptive_sample: int = 500
     profile: bool = True
 
+    def __post_init__(self):
+        if isinstance(self.adaptive_sample, bool) or not isinstance(self.adaptive_sample, int):
+            raise TypeError("adaptive_sample must be a positive integer")
+        if self.adaptive_sample < 1:
+            raise ValueError("adaptive_sample must be positive")
+
 
 class ThriftMeta:
-    """
-    Holds optimization metadata attached to a thriftified class.
-    """
-    def __init__(self, original_cls, config: ThriftConfig):
+    def __init__(self, original_cls, config):
         self.original_cls = original_cls
         self.config = config
-        self.strategies_applied: list[str] = []
-        self.original_size: int | None = None
-        self.optimized_size: int | None = None
-        self._adaptive_monitor: AdaptiveMonitor | None = None
+        self.strategies_applied = []
+        self.original_size = None
+        self.optimized_size = None
+        self._adaptive_monitor = None
+        self._field_info = {}
 
-    def report(self) -> MemoryReport:
+    def report(self):
         return MemoryReport(
-            class_name=self.original_cls.__name__,
-            strategies=self.strategies_applied,
-            original_size=self.original_size,
-            optimized_size=self.optimized_size,
-            field_info=getattr(self, "_field_info", {}),
+            self.original_cls.__name__,
+            list(self.strategies_applied),
+            self.original_size,
+            self.optimized_size,
+            {
+                k: {**v, "optimizations": list(v["optimizations"])}
+                for k, v in self._field_info.items()
+            },
         )
 
 
-@overload
-def thrift(cls: type[T]) -> type[T]: ...
-@overload
 def thrift(
+    cls=None,
     *,
-    slots: bool = True,
-    pack_bools: bool = True,
-    intern_strings: bool = True,
-    compact_ints: bool = True,
-    compact_floats: bool = True,
-    check_overflow: bool = False,
-    adaptive: bool = False,
-    adaptive_sample: int = 500,
-    profile: bool = True,
-) -> Any: ...
-
-
-def thrift(
-    cls: type[T] | None = None,
-    *,
-    slots: bool = True,
-    pack_bools: bool = True,
-    intern_strings: bool = True,
-    compact_ints: bool = True,
-    compact_floats: bool = True,
-    check_overflow: bool = False,
-    adaptive: bool = False,
-    adaptive_sample: int = 500,
-    profile: bool = True,
+    slots=True,
+    pack_bools=True,
+    intern_strings=True,
+    compact_ints=True,
+    compact_floats=True,
+    check_overflow=False,
+    adaptive=False,
+    adaptive_sample=500,
+    profile=True,
 ):
+    """Optimize annotated fields; custom and dataclass initializers run once."""
     config = ThriftConfig(
-        slots=slots,
-        pack_bools=pack_bools,
-        intern_strings=intern_strings,
-        compact_ints=compact_ints,
-        compact_floats=compact_floats,
-        check_overflow=check_overflow,
-        adaptive=adaptive,
-        adaptive_sample=adaptive_sample,
-        profile=profile,
+        slots,
+        pack_bools,
+        intern_strings,
+        compact_ints,
+        compact_floats,
+        check_overflow,
+        adaptive,
+        adaptive_sample,
+        profile,
     )
 
-    def decorator(cls: type[T]) -> type[T]:
+    def decorate(cls):
         return _apply_thrift(cls, config)
 
-    if cls is not None:
-        # called as @thrift without arguments
-        return decorator(cls)
-
-    return decorator
+    return decorate(cls) if cls is not None else decorate
 
 
-def _apply_thrift(cls: type[T], config: ThriftConfig,
-                  compact_overrides: dict | None = None) -> type[T]:
-    """Apply all configured optimizations to a class."""
-    meta = ThriftMeta(cls, config)
+def _apply_thrift(cls, config, compact_overrides=None):
+    if not isinstance(cls, type):
+        raise TypeError("@thrift expects a class")
+    if len(cls.__bases__) > 1:
+        raise TypeError("multiple inheritance is not supported")
+    if "__thrift_meta__" in vars(cls):
+        raise TypeError("class is already thriftified")
     annotations = get_annotations(cls)
-    field_info: dict[str, dict] = {
-        name: {"type": t, "optimizations": []} for name, t in annotations.items()
+    parent = cls.__bases__[0]
+    inherited = get_annotations(parent)
+    own = {name: value for name, value in annotations.items() if name not in inherited}
+    for name in set(cls.__dict__.get("__annotations__", {})) | set(vars(cls)):
+        if name in inherited and name in annotations:
+            raise TypeError(f"overriding inherited field '{name}' is not supported")
+    reserved = {
+        "__compact_buffer__",
+        "_bool_flags",
+        "memory_report",
+        "optimize",
+        "__adaptive_monitor__",
+        "__compact_buffer_size__",
     }
+    for name in reserved:
+        if name in vars(cls) or name in annotations:
+            raise TypeError(f"'{name}' is reserved by thriftclass")
+    for name in own:
+        value = vars(cls).get(name)
+        if hasattr(value, "__get__") and not isinstance(value, types.MemberDescriptorType):
+            raise TypeError(f"annotated descriptor '{name}' is not supported")
 
+    meta = ThriftMeta(cls, config)
+    field_info = {name: {"type": t, "optimizations": []} for name, t in annotations.items()}
+    parent_meta = getattr(parent, "__thrift_meta__", None)
+    if parent_meta:
+        for name, info in parent_meta._field_info.items():
+            field_info[name] = {**info, "optimizations": list(info["optimizations"])}
+    properties = {}
+    storage = []
+    compact = dict(getattr(parent, "__thrift_compact_fields__", {}))
+    total_size = getattr(parent, "__compact_buffer_size__", 0)
+    for name, typ in own.items():
+        if not ((typ is int and config.compact_ints) or (typ is float and config.compact_floats)):
+            continue
+        type_name, fmt = (compact_overrides or {}).get(name, SAFE_DEFAULTS[typ])
+        size = struct.calcsize("=" + fmt)
+        properties[name] = _make_compact_descriptor(name, fmt, total_size)
+        compact[name] = (type_name, fmt, total_size)
+        total_size += size
+        field_info[name]["optimizations"].append(f"{type_name} ({size} bytes in buffer)")
+    if total_size:
+        storage.append("__compact_buffer__")
+        meta.strategies_applied.append("compact_ints")
+    bit_map = dict(getattr(parent, "__thrift_bit_map__", {}))
+    bool_fields = [name for name, typ in own.items() if typ is bool]
+    if config.pack_bools and (len(bool_fields) >= 2 or bit_map):
+        for name in bool_fields:
+            bit = len(bit_map)
+            bit_map[name] = bit
+            properties[name] = make_bool_property(name, bit)
+            field_info[name]["optimizations"].append("packed into bitfield")
+    if bit_map:
+        storage.append("_bool_flags")
+        meta.strategies_applied.append("bool_packing")
+
+    new_cls = rebuild_class(cls, own, properties, storage, config.slots)
+    new_cls.__thrift_layout_owner__ = new_cls
+    new_cls.__compact_buffer_size__ = total_size
+    new_cls.__thrift_compact_fields__ = compact
+    new_cls.__thrift_bit_map__ = bit_map
+    new_cls.__thrift_bool_fields__ = tuple(bit_map)
+    if config.slots and not new_cls.__dictoffset__:
+        meta.strategies_applied.insert(0, "slots")
+
+    defaults = dict(getattr(parent, "__thrift_defaults__", {}))
+    for name in own:
+        if name in vars(cls) and not isinstance(vars(cls)[name], types.MemberDescriptorType):
+            defaults[name] = vars(cls)[name]
+    new_cls.__thrift_defaults__ = defaults
+    strings = set(getattr(parent, "__thrift_intern_fields__", ()))
+    if config.intern_strings:
+        strings.update(name for name, typ in own.items() if typ is str)
+    if strings:
+        apply_string_interning(new_cls, strings)
+        meta.strategies_applied.append("string_interning")
+        for name in strings:
+            field_info[name]["optimizations"] = ["interned"]
+
+    if not hasattr(new_cls, "__copy__"):
+        new_cls.__copy__ = copy_instance
+    frozen = dataclasses.is_dataclass(cls) and cls.__dataclass_params__.frozen
+    if frozen:
+        if "__getstate__" not in vars(cls):
+            new_cls.__getstate__ = instance_state
+        if "__setstate__" not in vars(cls):
+            new_cls.__setstate__ = restore_state
+    original_init = new_cls.__init__
+    # Plain classes without an initializer receive field-keyword construction.
+    field_init = original_init is object.__init__ or (
+        "__init__" not in vars(cls) and getattr(parent, "__thrift_field_init__", False)
+    )
+    if dataclasses.is_dataclass(cls) and not cls.__dataclass_params__.init:
+        field_init = False
+    new_cls.__thrift_field_init__ = field_init
+
+    def initialize(self, *args, **kwargs):
+        _initialize_storage(self, new_cls)
+        if field_init:
+            if args:
+                raise TypeError(f"{cls.__name__} accepts field keywords only")
+            unknown = kwargs.keys() - annotations.keys()
+            if unknown:
+                raise TypeError(f"unexpected field argument: {sorted(unknown)[0]}")
+            for name, value in kwargs.items():
+                setattr(self, name, value)
+        else:
+            original_init(self, *args, **kwargs)
+        # Also handles frozen dataclass initializers using object.__setattr__.
+        for name in strings:
+            try:
+                value = getattr(self, name)
+            except AttributeError:
+                continue
+            if type(value) is str:
+                object.__setattr__(self, name, sys.intern(value))
+
+        if frozen and meta._adaptive_monitor is not None:
+            for name in annotations:
+                try:
+                    value = getattr(self, name)
+                except AttributeError:
+                    continue
+                meta._adaptive_monitor._observe_field(self, name, value)
+
+    if not field_init:
+        functools.update_wrapper(initialize, original_init)
+    new_cls.__init__ = initialize
+    meta._field_info = field_info
     if config.profile:
         meta.original_size = _estimate_size(cls, annotations)
-
-    new_cls = cls
-
-    # 1. __slots__
-    if config.slots:
-        new_cls = apply_slots(new_cls, annotations)
-        meta.strategies_applied.append("slots")
-
-    # 2. Compact ints/floats (removes int/float from slots, adds __compact_buffer__)
-    if config.compact_ints or config.compact_floats:
-        new_cls, compact_opts = apply_compact_fields(
-            new_cls, annotations, config, compact_overrides
-        )
-        if compact_opts:
-            meta.strategies_applied.append("compact_ints")
-            for f, opt in compact_opts.items():
-                field_info[f]["optimizations"].append(opt)
-
-    # 3. Bool packing (removes bools from slots, packs into _bool_flags)
-    bool_fields = [name for name, t in annotations.items() if t is bool or t == "bool"]
-    if config.pack_bools and len(bool_fields) >= 2:
-        new_cls = apply_bool_packing(new_cls, bool_fields, annotations, slots_enabled=config.slots)
-        meta.strategies_applied.append("bool_packing")
-        for f in bool_fields:
-            field_info[f]["optimizations"].append("packed into bitfield")
-
-    # 4. String interning
-    str_fields = [name for name, t in annotations.items() if t is str or t == "str"]
-    if config.intern_strings and str_fields:
-        new_cls = apply_string_interning(new_cls, str_fields)
-        meta.strategies_applied.append("string_interning")
-        for f in str_fields:
-            field_info[f]["optimizations"].append("interned")
-
-    if config.profile:
         meta.optimized_size = _estimate_size(new_cls, annotations)
-
-    # 5. Adaptive monitor (after size estimation to avoid contamination)
     if config.adaptive:
         monitor = AdaptiveMonitor(new_cls, config, annotations)
-        new_cls = monitor.wrap(new_cls)
+        monitor.wrap(new_cls)
         meta._adaptive_monitor = monitor
         meta.strategies_applied.append("adaptive")
-    meta._field_info = field_info
-
     new_cls.__thrift_meta__ = meta
     new_cls.__thrift_config__ = config
-    new_cls.memory_report = classmethod(lambda cls_: meta.report())
-    def _optimize(cls):
-        """Rebuild class with adaptive recommendations applied.
-
-        Call after the monitor has collected enough samples.
-        Returns a new class with narrower compact types (e.g. int16, float32)
-        based on observed field ranges. Existing instances keep the old layout.
-        """
-        return _apply_optimizations(cls, meta)
-    new_cls.optimize = classmethod(_optimize)
-
+    new_cls.memory_report = classmethod(lambda _: meta.report())
+    new_cls.optimize = classmethod(lambda current: _apply_optimizations(current, meta))
     return new_cls
 
 
-def _apply_thrift_with_overrides(cls: type[T], config_overrides: dict, type_map: dict) -> type[T]:
-    """Re-apply thrift with specific compact type overrides (used by adaptive monitor)."""
-    config = ThriftConfig(**config_overrides)
-    return _apply_thrift(cls, config, compact_overrides=type_map)
+def _initialize_storage(obj, cls):
+    # A child wrapper initializes the complete layout before super().__init__.
+    size = cls.__compact_buffer_size__
+    if size:
+        try:
+            object.__getattribute__(obj, "__compact_buffer__")
+        except AttributeError:
+            object.__setattr__(obj, "__compact_buffer__", bytearray(size))
+    if cls.__thrift_bit_map__:
+        try:
+            object.__getattribute__(obj, "_bool_flags")
+        except AttributeError:
+            object.__setattr__(obj, "_bool_flags", 0)
+    for name, value in cls.__thrift_defaults__.items():
+        # Defaults are applied by the outermost initializer, not each super call.
+        if cls is getattr(type(obj), "__thrift_layout_owner__", cls):
+            object.__setattr__(obj, name, value)
 
 
-def _apply_optimizations(cls, meta: ThriftMeta):
-    """Rebuild class with adaptive recommendations applied."""
-    monitor = getattr(cls, "__adaptive_monitor__", None)
+def _apply_optimizations(cls, meta):
+    monitor = meta._adaptive_monitor
     if monitor is None:
         return cls
     report = monitor.get_report()
-    if not report.get("fields"):
+    if not report["analysis_complete"]:
         return cls
-
     type_map = {}
-    from .strategies.compacts import classify_int_range
-    for fname, info in report["fields"].items():
-        if info.get("type") == "int" and "observed_min" in info:
-            compact = classify_int_range(info["observed_min"], info["observed_max"])
-            type_map[fname] = compact
-        elif info.get("type") == "float" and "max_abs_value" in info:
-            if info["max_abs_value"] < 3.4e38:
-                type_map[fname] = ("float32", "f")
-            else:
-                type_map[fname] = ("float64", "d")
-
+    for name, info in report["fields"].items():
+        if info["type"] == "int" and meta.config.compact_ints:
+            lo, hi = info["observed_min"], info["observed_max"]
+            default = getattr(meta.original_cls, name, None)
+            if isinstance(default, int):
+                lo, hi = min(lo, default), max(hi, default)
+            type_map[name] = classify_int_range(lo, hi)
     if not type_map:
         return cls
-
-    config = meta.config
-    overrides = dict(
-        slots=config.slots,
-        pack_bools=config.pack_bools,
-        intern_strings=config.intern_strings,
-        compact_ints=True,
-        compact_floats=True,
-        check_overflow=False,
-        adaptive=False,
-        profile=config.profile,
+    # Never silently narrow floats: fitting their magnitude does not preserve precision.
+    return _apply_thrift(
+        meta.original_cls, dataclasses.replace(meta.config, adaptive=False), type_map
     )
-    return _apply_thrift_with_overrides(meta.original_cls, overrides, type_map)
 
 
-_DUMMY_VALUES = {
-    int: 0, float: 0.0, str: "", bool: False,
-    "int": 0, "float": 0.0, "str": "", "bool": False,
-}
-
-
-def _estimate_size(cls: type, annotations: dict) -> int:
+def _estimate_size(cls, annotations):
+    """Synthetic layout estimate without executing user constructors."""
+    if any("__del__" in vars(base) for base in cls.__mro__):
+        return None
     try:
-        dummy_kwargs = {name: _DUMMY_VALUES.get(t, None) for name, t in annotations.items()}
-
-        if dataclasses.is_dataclass(cls):
-            obj = cls(**dummy_kwargs)
-        else:
-            try:
-                obj = cls(**dummy_kwargs)
-            except TypeError:
-                obj = object.__new__(cls)
-                for slot in getattr(cls, "__slots__", ()):
-                    if slot == "__compact_buffer__":
-                        object.__setattr__(obj, "__compact_buffer__",
-                                           bytearray(getattr(cls, "__compact_buffer_size__", 0)))
-                    elif slot == "_bool_flags":
-                        object.__setattr__(obj, "_bool_flags", 0)
-                for k, v in dummy_kwargs.items():
-                    try:
-                        object.__setattr__(obj, k, v)
-                    except Exception:
-                        pass
-
+        obj = object.__new__(cls)
+        if "__thrift_defaults__" in vars(cls):
+            _initialize_storage(obj, cls)
+        for name, typ in annotations.items():
+            value = {int: 0, float: 0.0, str: "", bool: False}.get(typ)
+            object.__setattr__(obj, name, value)
         return deep_size(obj)
-    except Exception:
-        return 0
+    except (AttributeError, TypeError, ValueError, OverflowError):
+        return None
